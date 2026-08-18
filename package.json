@@ -1,11 +1,11 @@
 {
-  "name": "steamos-file-manager",
-  "version": "1.0.0",
+  "name": "decky-file-manager",
+  "version": "1.1.0",
   "description": "Gerenciador de arquivos para do Decky",
   "type": "module",
   "scripts": {
     "build": "rollup -c",
-    "package": "pnpm run build && rm -f steamos-file-manager.zip && rm -rf .tmp/steamos-file-manager && mkdir -p .tmp/steamos-file-manager && cp -r dist locales package.json plugin.json main.py README.md LICENSE .tmp/steamos-file-manager && cd .tmp && zip -r ../steamos-file-manager.zip steamos-file-manager && cd .. && rm -rf .tmp && echo 'steamos-file-manager.zip criado com sucesso.'",
+    "package": "pnpm run build && rm -f decky-file-manager.zip && rm -rf '.tmp/Decky File Manager' && mkdir -p '.tmp/Decky File Manager' && cp -r dist locales package.json plugin.json main.py README.md LICENSE '.tmp/Decky File Manager' && cd .tmp && zip -r ../decky-file-manager.zip 'Decky File Manager' && cd .. && rm -rf .tmp && echo 'decky-file-manager.zip criado com sucesso.'",
     "watch": "rollup -c -w",
     "auto-package": "pnpm run build && chokidar \"src/**\" -c 'pnpm run package'",
     "test": "echo \"Error: no test specified\" && exit 1"

@@ -282,12 +282,72 @@ function PluginIcon() {
   );
 }
 
+function SplitViewIcon() {
+  return (
+    <BaseIcon>
+      <path fillRule="evenodd" d="M3 4.5A1.5 1.5 0 0 1 4.5 3h15A1.5 1.5 0 0 1 21 4.5v15a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 19.5v-15Zm8.25 1.5h-6v12h6V6Zm1.5 0v12h6V6h-6Z" clipRule="evenodd" />
+    </BaseIcon>
+  );
+}
+
+function HomeIcon() {
+  return (
+    <BaseIcon>
+      <path d="M11.47 3.841a.75.75 0 0 1 1.06 0l8.69 8.69a.75.75 0 1 0 1.06-1.061l-8.689-8.69a2.25 2.25 0 0 0-3.182 0l-8.69 8.69a.75.75 0 1 0 1.061 1.06l8.69-8.689Z" />
+      <path d="m12 5.432 8.159 8.159c.03.03.06.058.091.086v6.198c0 1.035-.84 1.875-1.875 1.875H15a.75.75 0 0 1-.75-.75v-4.5a.75.75 0 0 0-.75-.75h-3a.75.75 0 0 0-.75.75V21a.75.75 0 0 1-.75.75H5.625a1.875 1.875 0 0 1-1.875-1.875v-6.198a2.29 2.29 0 0 0 .091-.086L12 5.432Z" />
+    </BaseIcon>
+  );
+}
+
+function SdCardIcon() {
+  return (
+    <BaseIcon>
+      <path fillRule="evenodd" d="M6 2.25A2.25 2.25 0 0 0 3.75 4.5v15A2.25 2.25 0 0 0 6 21.75h12a2.25 2.25 0 0 0 2.25-2.25V8.31c0-.597-.237-1.169-.659-1.591l-4.06-4.06a2.25 2.25 0 0 0-1.591-.659H6Zm2.25 3.75a.75.75 0 0 1 .75.75v2.25a.75.75 0 0 1-1.5 0V6.75a.75.75 0 0 1 .75-.75Zm3 0a.75.75 0 0 1 .75.75v2.25a.75.75 0 0 1-1.5 0V6.75a.75.75 0 0 1 .75-.75Zm3 0a.75.75 0 0 1 .75.75v2.25a.75.75 0 0 1-1.5 0V6.75a.75.75 0 0 1 .75-.75Z" clipRule="evenodd" />
+    </BaseIcon>
+  );
+}
+
+function UsbIcon() {
+  return (
+    <BaseIcon>
+      <path fillRule="evenodd" d="M11.25 1.5a.75.75 0 0 1 1.5 0v12.19l2.03-2.03a.75.75 0 1 1 1.06 1.06l-3 3a.75.75 0 0 1-1.06 0l-3-3a.75.75 0 1 1 1.06-1.06l1.41 1.41V1.5ZM5.25 15a2.25 2.25 0 0 0-2.25 2.25v3A2.25 2.25 0 0 0 5.25 22.5h13.5A2.25 2.25 0 0 0 21 20.25v-3A2.25 2.25 0 0 0 18.75 15h-2.379l-2.31 2.31a2.25 2.25 0 0 1-3.182 0L8.569 15H5.25Z" clipRule="evenodd" />
+    </BaseIcon>
+  );
+}
+
+function DriveIcon() {
+  return (
+    <BaseIcon>
+      <path fillRule="evenodd" d="M2.25 6.75A2.25 2.25 0 0 1 4.5 4.5h15a2.25 2.25 0 0 1 2.25 2.25v3.75H2.25V6.75Zm0 5.25v5.25A2.25 2.25 0 0 0 4.5 19.5h15a2.25 2.25 0 0 0 2.25-2.25V12H2.25Zm3.75 3a.75.75 0 0 1 .75-.75h3a.75.75 0 0 1 0 1.5h-3a.75.75 0 0 1-.75-.75Zm0-8.25a.75.75 0 0 1 .75-.75h3a.75.75 0 0 1 0 1.5h-3A.75.75 0 0 1 6 6.75Z" clipRule="evenodd" />
+    </BaseIcon>
+  );
+}
+
+function RootIcon() {
+  return (
+    <BaseIcon>
+      <path fillRule="evenodd" d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25Zm-1.5 1.66a8.28 8.28 0 0 0-2.02 3.34h-2.2a8.28 8.28 0 0 1 4.22-3.34Zm3 0a8.28 8.28 0 0 1 4.22 3.34h-2.2a8.28 8.28 0 0 0-2.02-3.34ZM12 3.9c.63.83 1.14 1.86 1.48 3.35h-2.96C10.86 5.76 11.37 4.73 12 3.9ZM3.9 12c0-.78.11-1.53.31-2.25h2.6a15.6 15.6 0 0 0 0 4.5h-2.6A8.2 8.2 0 0 1 3.9 12Zm4.4 0c0-.78.05-1.53.14-2.25h7.12c.09.72.14 1.47.14 2.25s-.05 1.53-.14 2.25H8.44A17.5 17.5 0 0 1 8.3 12Zm8.89-2.25h2.6a8.28 8.28 0 0 1 0 4.5h-2.6a15.6 15.6 0 0 0 0-4.5ZM12 20.1c-.63-.83-1.14-1.86-1.48-3.35h2.96c-.34 1.49-.85 2.52-1.48 3.35Zm-1.5-.01a8.28 8.28 0 0 1-4.22-3.34h2.2a8.28 8.28 0 0 0 2.02 3.34Zm3 0a8.28 8.28 0 0 0 2.02-3.34h2.2a8.28 8.28 0 0 1-4.22 3.34Z" clipRule="evenodd" />
+    </BaseIcon>
+  );
+}
+
 type FileEntry = {
   name: string;
   path: string;
   is_dir: boolean;
   size: number | null;
   modified: number;
+};
+
+type DriveKind = "home" | "root" | "sdcard" | "usb" | "internal";
+
+type DriveEntry = {
+  name: string;
+  path: string;
+  kind: DriveKind;
+  device: string | null;
+  total: number | null;
+  free: number | null;
 };
 
 function isArchiveFile(name: string): boolean {
@@ -320,21 +380,427 @@ function formatBytes(bytes: number): string {
   return `${value.toFixed(value < 10 && i > 0 ? 2 : 0)} ${sizes[i]}`;
 }
 
-const listDir = callable<[string], { path: string; items: FileEntry[] }>("list_dir");
+function parentDirOf(path: string): string {
+  const parts = path.split("/").filter((p) => p !== "");
+  parts.pop();
+  return parts.length === 0 ? "/" : "/" + parts.join("/");
+}
 
-function FileManagerPage() {
-  const [path, setPath] = useState("/home/deck");
-  const pathRef = useRef(path);
-  const [editedPath, setEditedPath] = useState("/home/deck");
+function shortPath(path: string, segments = 2): string {
+  const parts = path.split("/").filter(Boolean);
+  if (parts.length === 0) return "/";
+  if (parts.length <= segments) return "/" + parts.join("/");
+  return "…/" + parts.slice(-segments).join("/");
+}
+
+function driveIconFor(kind: DriveKind) {
+  if (kind === "home") return <HomeIcon />;
+  if (kind === "root") return <RootIcon />;
+  if (kind === "sdcard") return <SdCardIcon />;
+  if (kind === "usb") return <UsbIcon />;
+  return <DriveIcon />;
+}
+
+// An unlabelled volume falls back to its device node ("mmcblk0p1"), which is
+// no use to anyone; show what kind of drive it is instead.
+const RAW_DEVICE_NAME = /^(mmcblk\d|sd[a-z]\d?|nvme\d|loop\d|sr\d)/i;
+
+function driveLabelFor(drive: DriveEntry): string {
+  if (drive.kind === "home") return t("drive.home");
+  if (drive.kind === "root") return t("drive.root");
+  if (!drive.name || RAW_DEVICE_NAME.test(drive.name)) {
+    if (drive.kind === "sdcard") return t("drive.sdcard");
+    if (drive.kind === "usb") return t("drive.usb");
+    return t("drive.internal");
+  }
+  return drive.name;
+}
+
+const listDir = callable<[string], { path: string; items: FileEntry[] }>("list_dir");
+const listDrives = callable<[], { drives: DriveEntry[] }>("list_drives");
+
+type PaneIndex = 0 | 1;
+
+type PaneApi = {
+  index: PaneIndex;
+  path: string;
+  pathRef: React.MutableRefObject<string>;
+  editedPath: string;
+  setEditedPath: React.Dispatch<React.SetStateAction<string>>;
+  items: FileEntry[];
+  itemsRef: React.MutableRefObject<FileEntry[]>;
+  loading: boolean;
+  error: string | null;
+  setError: React.Dispatch<React.SetStateAction<string | null>>;
+  focusPathRef: React.MutableRefObject<string | null>;
+  setFocusPath: (value: string | null) => void;
+  loadPath: (newPath: string, notFoundMsg?: string, pushHistory?: boolean, focusTarget?: string | null) => Promise<void>;
+  refresh: () => Promise<void>;
+  goUp: () => boolean;
+};
+
+/**
+ * All of the per-panel browsing state. Two independent instances back the
+ * split view; in single-panel mode only the active one is rendered.
+ */
+function usePane(index: PaneIndex, initialPath: string): PaneApi {
+  const [path, setPathState] = useState(initialPath);
+  const pathRef = useRef(initialPath);
+  const [editedPath, setEditedPath] = useState(initialPath);
   const historyRef = useRef<Array<{ path: string; focusTarget: string | null }>>([]);
   const [items, setItems] = useState<FileEntry[]>([]);
+  const itemsRef = useRef<FileEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [focusPath, setFocusPath] = useState<string | null>(null);
+  const focusPathRef = useRef<string | null>(null);
+
+  const setFocusPath = useCallback((value: string | null) => {
+    focusPathRef.current = value;
+  }, []);
+
+  const applyListing = useCallback(
+    (res: { path: string; items: FileEntry[] }, focusTarget: string | null) => {
+      setPathState(res.path);
+      pathRef.current = res.path;
+      setEditedPath(res.path);
+      setItems(res.items);
+      itemsRef.current = res.items;
+      setFocusPath(focusTarget);
+    },
+    [setFocusPath],
+  );
+
+  const loadPath = useCallback(
+    async (newPath: string, notFoundMsg?: string, pushHistory = true, focusTarget: string | null = null) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await listDir(newPath);
+        if (pushHistory && res.path !== pathRef.current) {
+          historyRef.current = [...historyRef.current, { path: pathRef.current, focusTarget }];
+        }
+        applyListing(res, focusTarget);
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        setError(notFoundMsg ?? message ?? t("error.could_not_load_directory"));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [applyListing],
+  );
+
+  const refresh = useCallback(async () => {
+    const keepFocus = focusPathRef.current;
+    try {
+      const res = await listDir(pathRef.current);
+      applyListing(res, keepFocus);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      setError(message);
+    }
+  }, [applyListing]);
+
+  const goUp = useCallback(() => {
+    const current = pathRef.current;
+    if (!current || current === "/") return false;
+
+    const parent = parentDirOf(current);
+    if (parent === current) return false;
+
+    // Land back on the folder we just came out of, the way desktop file
+    // managers do, so repeated B presses walk a predictable trail.
+    void loadPath(parent, t("error.directory_not_found"), true, current);
+    return true;
+  }, [loadPath]);
+
+  return {
+    index,
+    path,
+    pathRef,
+    editedPath,
+    setEditedPath,
+    items,
+    itemsRef,
+    loading,
+    error,
+    setError,
+    focusPathRef,
+    setFocusPath,
+    loadPath,
+    refresh,
+    goUp,
+  };
+}
+
+function DriveChip({ drive, current, onSelect }: { drive: DriveEntry; current: boolean; onSelect: (drive: DriveEntry) => void }) {
+  const activate = useCallback(() => onSelect(drive), [drive, onSelect]);
+
+  return (
+    <Focusable
+      onActivate={activate}
+      onClick={activate}
+      focusWithinClassName="gpfocuswithin"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "6px 12px",
+        borderRadius: 4,
+        flexShrink: 0,
+        cursor: "pointer",
+        border: `1px solid ${current ? "rgba(120,180,255,0.9)" : "rgba(255,255,255,0.12)"}`,
+        background: current ? "rgba(120,180,255,0.16)" : "rgba(255,255,255,0.05)",
+      }}
+    >
+      {driveIconFor(drive.kind)}
+      <div style={{ display: "flex", flexDirection: "column", minWidth: 0, lineHeight: 1.2 }}>
+        <span style={{ fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 160 }}>
+          {driveLabelFor(drive)}
+        </span>
+        {drive.free !== null ? (
+          <span style={{ fontSize: 10, opacity: 0.6, whiteSpace: "nowrap" }}>
+            {t("drive.free").replace("{free}", formatBytes(drive.free))}
+          </span>
+        ) : null}
+      </div>
+    </Focusable>
+  );
+}
+
+function DrivesBar({ drives, currentPath, onSelect }: { drives: DriveEntry[]; currentPath: string; onSelect: (drive: DriveEntry) => void }) {
+  // Longest mount point that contains the current path wins the highlight, so
+  // "/run/media/SD" beats "/" when browsing the card.
+  const currentDrivePath = useMemo(() => {
+    let best: string | null = null;
+    for (const drive of drives) {
+      const prefix = drive.path === "/" ? "/" : `${drive.path}/`;
+      if (currentPath === drive.path || currentPath.startsWith(prefix)) {
+        if (best === null || drive.path.length > best.length) best = drive.path;
+      }
+    }
+    return best;
+  }, [drives, currentPath]);
+
+  if (!drives.length) return null;
+
+  return (
+    <div style={{ padding: "0 0 8px", minWidth: 0 }}>
+      <div style={{ fontSize: 11, letterSpacing: 0.6, opacity: 0.55, padding: "0 0 4px 2px" }}>{t("label.drives")}</div>
+      <Focusable
+        navEntryPreferPosition={NavEntryPositionPreferences.MAINTAIN_X}
+        style={{ display: "flex", gap: 8, overflowX: "auto", overflowY: "hidden", padding: "2px 0 4px" }}
+      >
+        {drives.map((drive) => (
+          <DriveChip key={drive.path} drive={drive} current={drive.path === currentDrivePath} onSelect={onSelect} />
+        ))}
+      </Focusable>
+    </div>
+  );
+}
+
+type PaneViewProps = {
+  pane: PaneApi;
+  dual: boolean;
+  active: boolean;
+  showHidden: boolean;
+  sortOrder: string;
+  fileTypeFilter: string;
+  onPaneFocus: (index: PaneIndex) => void;
+  onOpenDir: (pane: PaneApi, item: FileEntry) => void;
+  registerContainer: (index: PaneIndex, element: HTMLDivElement | null) => void;
+};
+
+function PaneView({
+  pane,
+  dual,
+  active,
+  showHidden,
+  sortOrder,
+  fileTypeFilter,
+  onPaneFocus,
+  onOpenDir,
+  registerContainer,
+}: PaneViewProps) {
+  const [visibleItemCount, setVisibleItemCount] = useState(150);
+
+  useEffect(() => {
+    setVisibleItemCount(150);
+  }, [pane.path, showHidden, sortOrder, fileTypeFilter]);
+
+  const filteredItems = useMemo(() => {
+    let filtered = pane.items;
+
+    if (!showHidden) {
+      filtered = filtered.filter((item) => !item.name.startsWith("."));
+    }
+
+    if (fileTypeFilter === "folders") {
+      filtered = filtered.filter((item) => item.is_dir);
+    } else if (fileTypeFilter === "files") {
+      filtered = filtered.filter((item) => !item.is_dir);
+    }
+
+    return [...filtered].sort((a, b) => {
+      const comparison = a.name.localeCompare(b.name);
+      return sortOrder === "asc" ? comparison : -comparison;
+    });
+  }, [pane.items, showHidden, fileTypeFilter, sortOrder]);
+
+  const visibleItems = filteredItems.slice(0, visibleItemCount);
+  const hasMoreItems = visibleItems.length < filteredItems.length;
+
+  const rows = (() => {
+    if (pane.loading) return <PanelSectionRow>{t("action.loading")}</PanelSectionRow>;
+    if (pane.error) return <PanelSectionRow>{pane.error}</PanelSectionRow>;
+    if (!filteredItems.length) return <PanelSectionRow>{t("panel.empty")}</PanelSectionRow>;
+
+    return (
+      <Focusable navEntryPreferPosition={NavEntryPositionPreferences.MAINTAIN_Y}>
+        {visibleItems.map((item) => (
+          <div key={item.path} data-item-path={item.path} data-pane-index={pane.index}>
+            <PanelSectionRow>
+              <Focusable
+                onActivate={() => onOpenDir(pane, item)}
+                onFocus={() => {
+                  pane.setFocusPath(item.path);
+                  onPaneFocus(pane.index);
+                }}
+              >
+                <ButtonItem onClick={() => onOpenDir(pane, item)} layout="below">
+                  <div style={{ width: "100%", display: "flex", justifyContent: "flex-start", textAlign: "left", alignItems: "center", gap: 10, minWidth: 0 }}>
+                    {item.is_dir ? <FolderIcon /> : isArchiveFile(item.name) ? <ArchiveIcon /> : <DocumentIcon />}
+                    <span
+                      style={{
+                        color: "currentColor",
+                        opacity: 0.95,
+                        fontSize: dual ? 13 : undefined,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        minWidth: 0,
+                      }}
+                    >
+                      {item.name}
+                    </span>
+                  </div>
+                </ButtonItem>
+              </Focusable>
+            </PanelSectionRow>
+          </div>
+        ))}
+        {hasMoreItems ? (
+          <PanelSectionRow>
+            <ButtonItem onClick={() => setVisibleItemCount((count) => count + 150)}>
+              {t("action.show_more").replace("{count}", String(filteredItems.length - visibleItems.length))}
+            </ButtonItem>
+          </PanelSectionRow>
+        ) : null}
+      </Focusable>
+    );
+  })();
+
+  const highlighted = dual && active;
+
+  return (
+    <div
+      ref={(element) => registerContainer(pane.index, element)}
+      data-pane-root
+      data-pane-index={pane.index}
+      style={{
+        flex: "1 1 0%",
+        minWidth: 0,
+        display: "flex",
+        flexDirection: "column",
+        borderRadius: 6,
+        overflow: "hidden",
+        border: `1px solid ${highlighted ? "rgba(120,180,255,0.85)" : "rgba(255,255,255,0.07)"}`,
+        background: highlighted ? "rgba(120,180,255,0.05)" : "rgba(0,0,0,0.12)",
+        boxShadow: highlighted ? "0 0 0 1px rgba(120,180,255,0.35)" : "none",
+        transition: "border-color 0.12s linear, background 0.12s linear",
+      }}
+    >
+      {dual ? (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "6px 10px",
+            borderBottom: "1px solid rgba(255,255,255,0.07)",
+            background: highlighted ? "rgba(120,180,255,0.12)" : "rgba(255,255,255,0.03)",
+            minWidth: 0,
+          }}
+        >
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: 0.5,
+              padding: "2px 6px",
+              borderRadius: 3,
+              flexShrink: 0,
+              background: highlighted ? "rgba(120,180,255,0.9)" : "rgba(255,255,255,0.12)",
+              color: highlighted ? "#0b1622" : "inherit",
+            }}
+          >
+            {pane.index === 0 ? "L1" : "R1"}
+          </span>
+          <span
+            title={pane.path}
+            style={{ flex: 1, minWidth: 0, fontSize: 12, opacity: highlighted ? 1 : 0.65, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", direction: "rtl", textAlign: "left" }}
+          >
+            {shortPath(pane.path, 3)}
+          </span>
+          <span style={{ fontSize: 11, opacity: 0.5, flexShrink: 0 }}>{filteredItems.length}</span>
+        </div>
+      ) : null}
+
+      <div
+        onScroll={(event) => {
+          const element = event.currentTarget;
+          if (element.scrollTop + element.clientHeight >= element.scrollHeight - 160) {
+            setVisibleItemCount((count) => Math.min(count + 150, filteredItems.length));
+          }
+        }}
+        style={{ flex: 1, minHeight: 0, overflowY: "auto", paddingBottom: 48, boxSizing: "border-box" }}
+      >
+        <PanelSection title={dual ? undefined : t("panel.files")}>{rows}</PanelSection>
+        <div style={{ height: 48, flexShrink: 0 }} />
+      </div>
+    </div>
+  );
+}
+
+const GAMEPAD_BUTTON_B = 1;
+const GAMEPAD_BUTTON_X = 2;
+const GAMEPAD_BUTTON_Y = 3;
+const GAMEPAD_BUTTON_LSHOULDER = 30;
+const GAMEPAD_BUTTON_RSHOULDER = 31;
+
+function FileManagerPage() {
+  const paneA = usePane(0, "/home/deck");
+  const paneB = usePane(1, "/home/deck");
+  const panesRef = useRef<[PaneApi, PaneApi]>([paneA, paneB]);
+  panesRef.current = [paneA, paneB];
+
+  const [dualPane, setDualPane] = useState(false);
+  const dualPaneRef = useRef(false);
+  // Mirror the rendered state every render. Maintaining this ref by hand
+  // inside the setter let it drift out of sync with what is on screen.
+  dualPaneRef.current = dualPane;
+  const [activePaneIndex, setActivePaneIndex] = useState<PaneIndex>(0);
+  const activePaneIndexRef = useRef<PaneIndex>(0);
+  const paneBInitialized = useRef(false);
+  const paneContainerRefs = useRef<Record<PaneIndex, HTMLDivElement | null>>({ 0: null, 1: null });
+
+  const activePane = activePaneIndex === 0 ? paneA : paneB;
+
+  const [drives, setDrives] = useState<DriveEntry[]>([]);
   const [showHidden, setShowHidden] = useState(false);
   const [sortOrder, setSortOrder] = useState("asc");
   const [fileTypeFilter, setFileTypeFilter] = useState("all");
-  const [visibleItemCount, setVisibleItemCount] = useState(150);
+
   const backTimeout = useRef<number | null>(null);
   const isLongBack = useRef(false);
   const backPressed = useRef(false);
@@ -343,12 +809,83 @@ function FileManagerPage() {
   const lastOverlayRemovedAt = useRef<number>(0);
   const isPluginActive = useRef(false);
   const contextMenuInstance = useRef<{ Hide(): void } | null>(null);
-  const itemRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  const listContainerRef = useRef<HTMLDivElement | null>(null);
   const pathInputScopeRef = useRef<HTMLDivElement | null>(null);
   const pathInputFocusedRef = useRef(false);
   const pathInputBlurTimerRef = useRef<number | null>(null);
   const pathInputLastFocusRef = useRef(0);
+
+  const registerPaneContainer = useCallback((index: PaneIndex, element: HTMLDivElement | null) => {
+    paneContainerRefs.current[index] = element;
+  }, []);
+
+  const setActivePane = useCallback((index: PaneIndex) => {
+    if (activePaneIndexRef.current === index) return;
+    activePaneIndexRef.current = index;
+    setActivePaneIndex(index);
+  }, []);
+
+  const [paneFocusRequest, setPaneFocusRequest] = useState(0);
+
+  /** Move gamepad focus into a panel, preferring the row it was left on. */
+  const focusPane = useCallback((index: PaneIndex) => {
+    activePaneIndexRef.current = index;
+    setActivePaneIndex(index);
+    // Focusing here would race the re-render this very call triggers: Steam
+    // restores its own focus afterwards and the panel switch silently fails
+    // about half the time. Hand it to an effect that runs after the commit.
+    setPaneFocusRequest((n) => n + 1);
+  }, []);
+
+  useEffect(() => {
+    if (!paneFocusRequest) return;
+
+    let cancelled = false;
+
+    const attempt = (triesLeft: number) => {
+      if (cancelled) return;
+
+      const index = activePaneIndexRef.current;
+      const container = paneContainerRefs.current[index];
+
+      if (container) {
+        const remembered = panesRef.current[index].focusPathRef.current;
+        let row: HTMLElement | null = null;
+        if (remembered) {
+          try {
+            row = container.querySelector<HTMLElement>(`[data-item-path="${CSS.escape(remembered)}"]`);
+          } catch {
+            row = null;
+          }
+        }
+        if (!row) {
+          row = container.querySelector<HTMLElement>("[data-item-path]");
+        }
+
+        const target = getFocusableElements(row ?? container)[0];
+        if (target) {
+          try {
+            target.focus();
+          } catch {
+          }
+          if (document.activeElement === target) return;
+        }
+      }
+
+      // The panel may still be loading, or Steam may have taken focus back.
+      if (triesLeft > 0) {
+        window.setTimeout(() => attempt(triesLeft - 1), 60);
+      }
+    };
+
+    attempt(5);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [paneFocusRequest]);
+
+  const focusPaneRef = useRef(focusPane);
+  focusPaneRef.current = focusPane;
 
   const stabilizePathInputFocus = useCallback(() => {
     const focusInput = () => {
@@ -362,34 +899,52 @@ function FileManagerPage() {
     window.setTimeout(focusInput, 80);
     window.setTimeout(focusInput, 180);
   }, []);
+
+  const hasActiveModalRef = useRef(false);
+
+  /**
+   * Whether a keyboard/controller shortcut should be swallowed.
+   *
+   * Deliberately narrow: a document-wide querySelector for things like
+   * [aria-haspopup] also matches Steam's own chrome and is therefore true all
+   * the time, which silently kills every shortcut. Only an overlay that
+   * actually holds focus counts.
+   */
+  const isShortcutBlocked = useCallback(() => {
+    if (hasActiveModalRef.current) return true;
+    if (typeof document === "undefined") return false;
+
+    const active = document.activeElement as HTMLElement | null;
+    return Boolean(active?.closest("[role='menu'], [role='dialog'], [data-modal-root], [data-decky-modal], .contextMenu, .contextMenuContents, .BasicContextMenuModal"));
+  }, []);
+
+  /**
+   * Focus lands on the path field when the plugin opens, so panel shortcuts
+   * must work from there rather than being swallowed. Step out of the field
+   * first so the press does not also edit the path.
+   */
+  const leavePathInput = useCallback(() => {
+    if (typeof document === "undefined") return;
+    const active = document.activeElement as HTMLElement | null;
+    if (!isTextInputElement(active)) return;
+
+    pathInputFocusedRef.current = false;
+    pathInputLastFocusRef.current = 0;
+    if (pathInputBlurTimerRef.current !== null) {
+      window.clearTimeout(pathInputBlurTimerRef.current);
+      pathInputBlurTimerRef.current = null;
+    }
+    try {
+      active?.blur();
+    } catch {
+    }
+  }, []);
+
   const openContextMenuRef = useRef<(item: FileEntry | null) => void>(() => null);
   const getCurrentFocusedItemRef = useRef<() => FileEntry | null>(() => null);
   const goBackRef = useRef<() => void>(() => null);
   const exitPluginRef = useRef<() => void>(() => null);
-
-  const loadPath = useCallback(
-    async (newPath: string, notFoundMsg?: string, pushHistory = true, focusTarget: string | null = null) => {
-      setLoading(true);
-      setError(null);
-      try {
-        const res = await listDir(newPath);
-        if (pushHistory && newPath !== pathRef.current) {
-          historyRef.current = [...historyRef.current, { path: pathRef.current, focusTarget }];
-        }
-        setPath(res.path);
-        pathRef.current = res.path;
-        setEditedPath(res.path);
-        setItems(res.items);
-        setFocusPath(focusTarget);
-      } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
-        setError(notFoundMsg ?? message ?? t("error.could_not_load_directory"));
-      } finally {
-        setLoading(false);
-      }
-    },
-    [path],
-  );
+  const toggleDualPaneRef = useRef<() => void>(() => null);
 
   const exitPlugin = useCallback(() => {
     Router.CloseSideMenus();
@@ -400,39 +955,22 @@ function FileManagerPage() {
   }, []);
 
   const goBack = useCallback(() => {
-    setError(null);
-
-    try {
-      if (!path || path === "/") {
-        exitPlugin();
-        return;
-      }
-
-      const parts = path.split("/");
-      const filtered = parts.filter((p) => p !== "");
-
-      if (filtered.length === 0) {
-        exitPlugin();
-        return;
-      }
-
-      filtered.pop();
-      const parentDir = "/" + filtered.join("/") || "/";
-
-      if (parentDir === path) {
-        exitPlugin();
-        return;
-      }
-
-      void loadPath(parentDir, t("error.directory_not_found"));
-    } catch (e) {
-      if (historyRef.current.length > 0) {
-        const previousEntry = historyRef.current[historyRef.current.length - 1];
-        historyRef.current = historyRef.current.slice(0, -1);
-        void loadPath(previousEntry.path, t("error.directory_not_found"), false, previousEntry.focusTarget);
-      }
+    const pane = panesRef.current[activePaneIndexRef.current];
+    pane.setError(null);
+    if (!pane.goUp()) {
+      exitPlugin();
     }
-  }, [loadPath, path, exitPlugin]);
+  }, [exitPlugin]);
+
+  const refreshDrives = useCallback(async () => {
+    try {
+      const res = await listDrives();
+      setDrives(res.drives ?? []);
+    } catch (e) {
+      console.warn("drives: could not enumerate", e);
+      setDrives([]);
+    }
+  }, []);
 
   const initialLoadDone = useRef(false);
 
@@ -453,18 +991,44 @@ function FileManagerPage() {
 
     if (initialLoadDone.current) return;
     initialLoadDone.current = true;
-    loadPath(path);
-  }, [loadPath, path]);
+    const [first] = panesRef.current;
+    void first.loadPath(first.pathRef.current);
+    void refreshDrives();
+  }, [refreshDrives]);
 
+  // Opening the split clones the current folder into the new panel once, then
+  // each panel keeps its own location. Driven off the state rather than the
+  // setter so it runs no matter who flipped the split.
   useEffect(() => {
-    setVisibleItemCount(150);
-  }, [path, showHidden, sortOrder, fileTypeFilter]);
+    if (!dualPane) return;
+    if (paneBInitialized.current) return;
+    paneBInitialized.current = true;
+
+    const [first, second] = panesRef.current;
+    const source = panesRef.current[activePaneIndexRef.current];
+    const target = source.index === 0 ? second : first;
+    void target.loadPath(source.pathRef.current, undefined, false, null);
+  }, [dualPane]);
+
+  // A functional update cannot go stale, and setDualPane is a plain useState
+  // setter, so calling it twice with the same value is inherently harmless.
+  const toggleDualPane = useCallback(() => {
+    setDualPane((prev) => !prev);
+  }, []);
+
+  const goToDrive = useCallback((drive: DriveEntry) => {
+    const pane = panesRef.current[activePaneIndexRef.current];
+    pane.setError(null);
+    void pane.loadPath(drive.path, t("error.directory_not_found"));
+  }, []);
 
   const hasClipboard = callable<[], { has: boolean }>("has_clipboard");
   const copyPath = callable<[string], { ok: boolean }>("copy_path");
   const cutPath = callable<[string], { ok: boolean }>("cut_path");
   const pastePathWithOptions = callable<[string, string, boolean], { ok: boolean; skipped?: boolean; cancelled?: boolean; conflict_strategy?: string }>("paste_path_with_options");
   const checkPasteConflict = callable<[string], { blocked: boolean; reason?: string; needs_conflict?: boolean; path?: string; name: string; is_dir?: boolean }>("check_paste_conflict");
+  const checkTransferConflict = callable<[string, string], { needs_conflict?: boolean; path?: string; name: string; is_dir?: boolean }>("check_transfer_conflict");
+  const transferPath = callable<[string, string, string, string], { ok: boolean; success?: boolean; new_path?: string; skipped?: boolean; cancelled?: boolean }>("transfer_path");
   const extractArchive = callable<[string, string], { success: boolean; new_path?: string }>("extract_archive");
   const renamePath = callable<[string, string], { success: boolean; new_path: string }>("rename_item");
   const deletePath = callable<[string], { success: boolean; error?: string }>("delete_item");
@@ -479,8 +1043,9 @@ function FileManagerPage() {
   }>("get_properties");
   const getDirectorySize = callable<[string], { size: number | null; path: string }>("get_directory_size");
 
-
   const [clipboardHas, setClipboardHas] = useState(false);
+  const [error, setErrorState] = useState<string | null>(null);
+  const setError = setErrorState;
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState<string>("");
   const [renameRequested, setRenameRequested] = useState(false);
@@ -512,6 +1077,7 @@ function FileManagerPage() {
     targetDir: string;
     itemName: string;
     isFolderConflict: boolean;
+    transfer?: { srcPath: string; mode: "copy" | "cut" };
   } | null;
   type OperationModalState = {
     label: string;
@@ -534,6 +1100,7 @@ function FileManagerPage() {
   const createFolderConfirmRef = useRef<HTMLButtonElement | null>(null);
   const fileManagerScopeRef = useRef<HTMLDivElement | null>(null);
   const hasActiveModal = renameRequested || deleteRequested || propertiesRequested || createFolderRequested || !!conflictModal || !!operationModal || !!permissionModal;
+  hasActiveModalRef.current = hasActiveModal;
 
   const isDropdownMenuOpenInDom = useCallback(() => {
     if (typeof document === "undefined") return false;
@@ -641,7 +1208,7 @@ function FileManagerPage() {
         setClipboardHas(false);
       }
     })();
-  }, [hasClipboard, path]);
+  }, [hasClipboard, activePane.path]);
 
   const isAnyModalOrMenuOpen = useCallback(() => {
     if (contextMenuInstance.current) {
@@ -681,12 +1248,31 @@ function FileManagerPage() {
         (_controllerIndex: number, gamepadButton: number, isPressed: boolean) => {
           if (!isPluginActive.current) return;
 
-          const GAMEPAD_BUTTON_B = 1;
-          const GAMEPAD_BUTTON_Y = 3;
-
           if (gamepadButton === GAMEPAD_BUTTON_Y && isPressed) {
             const item = getCurrentFocusedItemRef.current();
             openContextMenuRef.current(item);
+            return;
+          }
+
+          // X toggles the split; the shoulder buttons jump between panels and
+          // R1 opens the split when there is nothing to the right yet.
+          if (gamepadButton === GAMEPAD_BUTTON_X && isPressed) {
+            if (isShortcutBlocked()) return;
+            leavePathInput();
+            toggleDualPaneRef.current();
+            return;
+          }
+
+          if ((gamepadButton === GAMEPAD_BUTTON_LSHOULDER || gamepadButton === GAMEPAD_BUTTON_RSHOULDER) && isPressed) {
+            if (isShortcutBlocked()) return;
+            leavePathInput();
+
+            // Only ever move between panels. Opening the split from here made
+            // R1 reinstate a view the user had just closed.
+            if (!dualPaneRef.current) return;
+
+            const target: PaneIndex = gamepadButton === GAMEPAD_BUTTON_LSHOULDER ? 0 : 1;
+            focusPaneRef.current(target);
             return;
           }
 
@@ -816,7 +1402,7 @@ function FileManagerPage() {
         unregister.Unregister();
       }
     };
-  }, [isAnyModalOrMenuOpen]);
+  }, [isAnyModalOrMenuOpen, isDropdownMenuOpenInDom, isShortcutBlocked, leavePathInput]);
 
   useEffect(() => {
     if (renameRequested) {
@@ -874,10 +1460,18 @@ function FileManagerPage() {
     }
   }, [hasClipboard]);
 
+  const refreshPanes = useCallback(async () => {
+    const [first, second] = panesRef.current;
+    await first.refresh();
+    if (paneBInitialized.current) {
+      await second.refresh();
+    }
+  }, []);
+
   const isOperationRunning = useRef(false);
 
   const runOperation = useCallback(
-    async (label: string, action: () => Promise<any>, options?: { onError?: (e: any) => void }) => {
+    async (label: string, action: () => Promise<any>, options?: { onError?: (e: any) => void; onSuccess?: (res: any) => void }) => {
       if (isOperationRunning.current) {
         setError(t("action.another_running"));
         return null;
@@ -906,12 +1500,15 @@ function FileManagerPage() {
         }
 
         setOperationModal((prev) => prev ? { ...prev, progress: 100 } : prev);
-        
-        await refreshClipboard();
-        await loadPath(path);
 
-        if (res && typeof res === "object" && (res as any).new_path) {
-          setFocusPath((res as any).new_path as string);
+        await refreshClipboard();
+        await refreshPanes();
+        void refreshDrives();
+
+        if (options?.onSuccess) {
+          options.onSuccess(res);
+        } else if (res && typeof res === "object" && (res as any).new_path) {
+          panesRef.current[activePaneIndexRef.current].setFocusPath((res as any).new_path as string);
         }
 
         window.setTimeout(() => setOperationModal(null), 220);
@@ -919,7 +1516,7 @@ function FileManagerPage() {
       } catch (e: any) {
         setOperationModal(null);
         await refreshClipboard();
-        
+
         if (options?.onError) {
           options.onError(e);
         } else {
@@ -932,8 +1529,19 @@ function FileManagerPage() {
         isOperationRunning.current = false;
       }
     },
-    [operationCancelRequested, refreshClipboard, loadPath, path],
+    [operationCancelRequested, refreshClipboard, refreshPanes, refreshDrives, setError],
   );
+
+  const handleOperationError = useCallback((e: any, fallbackKey: string) => {
+    const message = String(e?.message ?? t(fallbackKey));
+    // The backend raises Portuguese messages; "permissão" is the marker that
+    // this is an access problem rather than a real failure worth inlining.
+    if (message.toLowerCase().includes("permissão")) {
+      setPermissionModal({ message: t("permission.denied") });
+    } else {
+      setError(message);
+    }
+  }, [setError]);
 
   const handlePaste = useCallback(async (targetDir: string) => {
     try {
@@ -955,48 +1563,86 @@ function FileManagerPage() {
       }
 
       await runOperation(t("action.pasting"), () => pastePathWithOptions(targetDir, "keep-both", false), {
-        onError: (e) => {
-          const message = String(e?.message ?? t("action.failed"));
-          if (message.toLowerCase().includes("permissão")) {
-            setPermissionModal({ message: t("permission.denied") });
-          } else {
-            setError(message);
-          }
-        },
+        onError: (e) => handleOperationError(e, "action.failed"),
       });
     } catch (e: any) {
       setError(e?.message ?? t("error.prepare_paste"));
     }
-  }, [checkPasteConflict, runOperation]);
+  }, [checkPasteConflict, runOperation, handleOperationError, setError]);
+
+  /** Copy or move straight into the other panel — the point of a split view. */
+  const handleTransferToOtherPane = useCallback(async (item: FileEntry, mode: "copy" | "cut") => {
+    const source = panesRef.current[activePaneIndexRef.current];
+    const destination = panesRef.current[source.index === 0 ? 1 : 0];
+    const targetDir = destination.pathRef.current;
+
+    if (parentDirOf(item.path) === targetDir) {
+      setError(t("error.same_folder"));
+      return;
+    }
+
+    const label = mode === "copy" ? t("action.copying") : t("action.moving");
+
+    try {
+      const conflict = await checkTransferConflict(item.path, targetDir);
+      if (conflict.needs_conflict) {
+        setConflictModal({
+          title: conflict.is_dir ? t("conflict.folder_exists") : t("conflict.file_exists"),
+          message: t("conflict.message").replace("{name}", conflict.name),
+          targetDir,
+          itemName: conflict.name,
+          isFolderConflict: Boolean(conflict.is_dir),
+          transfer: { srcPath: item.path, mode },
+        });
+        return;
+      }
+
+      await runOperation(label, () => transferPath(item.path, targetDir, mode, "keep-both"), {
+        onError: (e) => handleOperationError(e, "action.failed"),
+        onSuccess: (res) => {
+          if (res?.new_path) destination.setFocusPath(res.new_path as string);
+        },
+      });
+    } catch (e: any) {
+      handleOperationError(e, "action.failed");
+    }
+  }, [checkTransferConflict, transferPath, runOperation, handleOperationError, setError]);
 
   const createFolderCallable = callable<[string, string], { success: boolean; path?: string }>("create_folder");
 
   const handleCreateFolder = useCallback(async (parentDir: string, name: string) => {
     if (!name) return setError(t("error.invalid_name"));
-      await runOperation(t("action.creating_folder"), () => createFolderCallable(parentDir, name), {
+    await runOperation(t("action.creating_folder"), () => createFolderCallable(parentDir, name), {
       onError: (e) => {
-          setError(e?.message ?? t("error.could_not_create_folder"));
+        setError(e?.message ?? t("error.could_not_create_folder"));
       },
     });
     setCreateFolderRequested(false);
     setCreateFolderName("");
-  }, [createFolderCallable, runOperation]);
+  }, [createFolderCallable, runOperation, setError]);
 
   const handleConflictChoice = useCallback(async (strategy: string, applyToAll = false) => {
     if (!conflictModal) return;
 
+    const pending = conflictModal;
     setConflictModal(null);
-    await runOperation(t("action.pasting"), () => pastePathWithOptions(conflictModal.targetDir, strategy, applyToAll), {
-      onError: (e) => {
-        const message = String(e?.message ?? t("action.failed"));
-        if (message.toLowerCase().includes("permissão")) {
-          setPermissionModal({ message: t("permission.denied") });
-        } else {
-          setError(message);
-        }
-      },
+
+    if (pending.transfer) {
+      const destination = panesRef.current.find((pane) => pane.pathRef.current === pending.targetDir) ?? null;
+      const label = pending.transfer.mode === "copy" ? t("action.copying") : t("action.moving");
+      await runOperation(label, () => transferPath(pending.transfer!.srcPath, pending.targetDir, pending.transfer!.mode, strategy), {
+        onError: (e) => handleOperationError(e, "action.failed"),
+        onSuccess: (res) => {
+          if (res?.new_path && destination) destination.setFocusPath(res.new_path as string);
+        },
+      });
+      return;
+    }
+
+    await runOperation(t("action.pasting"), () => pastePathWithOptions(pending.targetDir, strategy, applyToAll), {
+      onError: (e) => handleOperationError(e, "action.failed"),
     });
-  }, [conflictModal, runOperation]);
+  }, [conflictModal, runOperation, transferPath, handleOperationError]);
 
   const openContextMenu = useCallback(
     (item: FileEntry | null) => {
@@ -1005,20 +1651,35 @@ function FileManagerPage() {
         contextMenuInstance.current = null;
       }
 
-      let parentEl: EventTarget | undefined;
-      if (item) {
-        parentEl = (itemRefs.current[item.path] as EventTarget) ?? (typeof document !== "undefined" ? document.activeElement as EventTarget : undefined);
-      } else {
-        parentEl = listContainerRef.current ?? (typeof document !== "undefined" ? document.activeElement as EventTarget : undefined);
-      }
+      const currentPane = panesRef.current[activePaneIndexRef.current];
+      const currentDir = currentPane.pathRef.current;
+      const splitOn = dualPaneRef.current;
+
+      const anchor =
+        (typeof document !== "undefined" && document.activeElement instanceof HTMLElement ? (document.activeElement as EventTarget) : undefined) ??
+        (paneContainerRefs.current[currentPane.index] as EventTarget | null) ??
+        undefined;
+
+      const paste = () => void handlePaste(currentDir);
+      const toggleSplit = () => {
+        const next = !splitOn;
+        // The menu lives in a separate React root that Steam tears down
+        // synchronously on activation; a state update dispatched into our root
+        // mid-teardown gets dropped. Close it, then apply on the next tick.
+        if (contextMenuInstance.current) {
+          contextMenuInstance.current.Hide();
+          contextMenuInstance.current = null;
+        }
+        window.setTimeout(() => setDualPane(next), 0);
+      };
 
       if (item) {
         const copy = async () => {
           try {
-              await copyPath(item.path);
+            await copyPath(item.path);
             await refreshClipboard();
           } catch (e: any) {
-              setError(e?.message ?? t("error.could_not_copy"));
+            setError(e?.message ?? t("error.could_not_copy"));
           }
         };
         const cut = async () => {
@@ -1031,25 +1692,18 @@ function FileManagerPage() {
         };
         const extract = async () => {
           try {
-            const targetDir = pathRef.current ?? path;
-                const res = await runOperation(t("action.extracting"), () => extractArchive(item.path, targetDir), {
-              onError: (e) => {
-                    const message = String(e?.message ?? t("error.could_not_extract"));
-                if (message.toLowerCase().includes("permissão")) {
-                      setPermissionModal({ message: t("permission.denied") });
-                } else {
-                      setError(message);
-                }
-              },
+            const res = await runOperation(t("action.extracting"), () => extractArchive(item.path, currentDir), {
+              onError: (e) => handleOperationError(e, "error.could_not_extract"),
             });
             if (res && res.new_path) {
-              setFocusPath(res.new_path);
+              currentPane.setFocusPath(res.new_path);
             }
           } catch (e: any) {
             setError(e?.message ?? t("error.could_not_extract"));
           }
         };
-        const paste = () => void handlePaste(pathRef.current ?? path);
+        const copyToOther = () => void handleTransferToOtherPane(item, "copy");
+        const moveToOther = () => void handleTransferToOtherPane(item, "cut");
         const rename = () => {
           setRenameTarget(item.path);
           setRenameValue(item.name);
@@ -1067,39 +1721,22 @@ function FileManagerPage() {
 
               setPropertiesData(props);
               setPropertiesRequested(true);
+              setIsCalculatingFolderSize(props.type === "folder");
 
               if (props.type === "folder") {
-              setIsCalculatingFolderSize(true);
-              } else {
-              setIsCalculatingFolderSize(false);
-              }
-
-if (props.type === "folder") {
                 getDirectorySize(item.path)
-    .then((sizeResult) => {
-
-        if (sizeResult.size !== null) {
-            setPropertiesData((prev) =>
-                prev
-                    ? {
-                        ...prev,
-                        size: sizeResult.size
+                  .then((sizeResult) => {
+                    if (sizeResult.size !== null) {
+                      setPropertiesData((prev) => (prev ? { ...prev, size: sizeResult.size } : prev));
                     }
-                    : prev
-            );
-        }
-
-        setIsCalculatingFolderSize(false);
-
-    })
-    .catch(() => {
-
-        setIsCalculatingFolderSize(false);
-
-    });
+                    setIsCalculatingFolderSize(false);
+                  })
+                  .catch(() => {
+                    setIsCalculatingFolderSize(false);
+                  });
               }
             } catch (e: any) {
-                setError(e?.message ?? t("error.could_not_properties"));
+              setError(e?.message ?? t("error.could_not_properties"));
             }
           })();
         };
@@ -1115,6 +1752,20 @@ if (props.type === "folder") {
             <MenuItem onClick={() => void cut()} onSelected={() => void cut()}>
               <span style={{ display: "flex", alignItems: "center", gap: 10 }}><CutIcon />{t("menu.cut")}</span>
             </MenuItem>
+
+            {splitOn ? <MenuSeparator /> : null}
+            {splitOn ? (
+              <MenuItem onClick={copyToOther} onSelected={copyToOther}>
+                <span style={{ display: "flex", alignItems: "center", gap: 10 }}><CopyIcon />{t("menu.copy_to_other")}</span>
+              </MenuItem>
+            ) : null}
+            {splitOn ? (
+              <MenuItem onClick={moveToOther} onSelected={moveToOther}>
+                <span style={{ display: "flex", alignItems: "center", gap: 10 }}><CutIcon />{t("menu.move_to_other")}</span>
+              </MenuItem>
+            ) : null}
+            {splitOn ? <MenuSeparator /> : null}
+
             {isArchiveFile(item.name) ? (
               <MenuItem onClick={() => void extract()} onSelected={() => void extract()}>
                 <span style={{ display: "flex", alignItems: "center", gap: 10 }}><ExtractIcon />{t("menu.extract")}</span>
@@ -1123,6 +1774,10 @@ if (props.type === "folder") {
 
             <MenuItem onClick={() => setCreateFolderRequested(true)} onSelected={() => setCreateFolderRequested(true)}>
               <span style={{ display: "flex", alignItems: "center", gap: 10 }}><NewFolderIcon />{t("menu.newFolder")}</span>
+            </MenuItem>
+
+            <MenuItem onClick={toggleSplit} onSelected={toggleSplit}>
+              <span style={{ display: "flex", alignItems: "center", gap: 10 }}><SplitViewIcon />{splitOn ? t("menu.split_view_close") : t("menu.split_view")}</span>
             </MenuItem>
 
             <MenuSeparator />
@@ -1139,16 +1794,29 @@ if (props.type === "folder") {
               <span style={{ display: "flex", alignItems: "center", gap: 10 }}><PropertiesIcon />{t("menu.properties")}</span>
             </MenuItem>
           </Menu>,
-          parentEl,
+          anchor,
         );
       } else {
-        const paste = () => void handlePaste(pathRef.current ?? path);
         contextMenuInstance.current = showContextMenu(
           <Menu label={t("menu.options")}>
-            {clipboardHas ? <MenuItem onClick={paste} onSelected={paste}>{t("menu.paste")}</MenuItem> : null}
-            <MenuItem onClick={() => setCreateFolderRequested(true)} onSelected={() => setCreateFolderRequested(true)}>{t("menu.newFolder")}</MenuItem>
+            {clipboardHas ? <MenuItem onClick={paste} onSelected={paste}><span style={{ display: "flex", alignItems: "center", gap: 10 }}><PasteIcon />{t("menu.paste")}</span></MenuItem> : null}
+            <MenuItem onClick={() => setCreateFolderRequested(true)} onSelected={() => setCreateFolderRequested(true)}>
+              <span style={{ display: "flex", alignItems: "center", gap: 10 }}><NewFolderIcon />{t("menu.newFolder")}</span>
+            </MenuItem>
+            <MenuItem onClick={toggleSplit} onSelected={toggleSplit}>
+              <span style={{ display: "flex", alignItems: "center", gap: 10 }}><SplitViewIcon />{splitOn ? t("menu.split_view_close") : t("menu.split_view")}</span>
+            </MenuItem>
+            {drives.length ? <MenuSeparator /> : null}
+            {drives.map((drive) => {
+              const go = () => goToDrive(drive);
+              return (
+                <MenuItem key={drive.path} onClick={go} onSelected={go}>
+                  <span style={{ display: "flex", alignItems: "center", gap: 10 }}>{driveIconFor(drive.kind)}{driveLabelFor(drive)}</span>
+                </MenuItem>
+              );
+            })}
           </Menu>,
-          parentEl,
+          anchor,
         );
       }
     },
@@ -1157,48 +1825,57 @@ if (props.type === "folder") {
       copyPath,
       cutPath,
       deletePath,
+      drives,
+      extractArchive,
+      getDirectorySize,
       getProperties,
-      loadPath,
-      path,
+      goToDrive,
+      handleOperationError,
+      handlePaste,
+      handleTransferToOtherPane,
       refreshClipboard,
       renamePath,
       runOperation,
-      handlePaste,
+      setError,
     ],
   );
 
   const getCurrentFocusedItem = useCallback(() => {
     if (typeof document === "undefined") return null;
+
     const active = document.activeElement as HTMLElement | null;
     if (active) {
       try {
-        const closest = (active as HTMLElement).closest('[data-item-path]') as HTMLElement | null;
-        if (closest) {
-          const p = closest.getAttribute('data-item-path');
-          if (p) {
-            const found = items.find((it) => it.path === p);
+        const row = active.closest("[data-item-path]") as HTMLElement | null;
+        if (row) {
+          const itemPath = row.getAttribute("data-item-path");
+          const paneAttr = row.getAttribute("data-pane-index");
+          const paneIndex: PaneIndex = paneAttr === "1" ? 1 : 0;
+          if (itemPath) {
+            const found = panesRef.current[paneIndex].itemsRef.current.find((it) => it.path === itemPath);
             if (found) return found;
           }
         }
       } catch (e) {
       }
     }
-    if (focusPath) {
-      const focusedItem = items.find((item) => item.path === focusPath);
-      if (focusedItem) {
-        return focusedItem;
-      }
+
+    const pane = panesRef.current[activePaneIndexRef.current];
+    if (pane.focusPathRef.current) {
+      const focusedItem = pane.itemsRef.current.find((it) => it.path === pane.focusPathRef.current);
+      if (focusedItem) return focusedItem;
     }
 
     return null;
-  }, [focusPath, items]);
+  }, []);
 
   useEffect(() => {
     openContextMenuRef.current = openContextMenu;
     getCurrentFocusedItemRef.current = getCurrentFocusedItem;
     goBackRef.current = goBack;
     exitPluginRef.current = exitPlugin;
-  }, [openContextMenu, getCurrentFocusedItem, goBack, exitPlugin]);
+    toggleDualPaneRef.current = toggleDualPane;
+  }, [openContextMenu, getCurrentFocusedItem, goBack, exitPlugin, toggleDualPane]);
 
   const handleFooterTriangle = useCallback(() => {
     const item = getCurrentFocusedItemRef.current();
@@ -1208,13 +1885,21 @@ if (props.type === "folder") {
   const handleFooterCross = useCallback(() => {
     const item = getCurrentFocusedItemRef.current();
     if (item && item.is_dir) {
-      void loadPath(item.path, undefined, true, item.path);
+      const pane = panesRef.current[activePaneIndexRef.current];
+      void pane.loadPath(item.path, undefined, true, item.path);
     }
-  }, [loadPath]);
+  }, []);
 
   const handleFooterCircle = useCallback(() => {
     goBack();
   }, [goBack]);
+
+  const handleOpenDir = useCallback((pane: PaneApi, item: FileEntry) => {
+    setActivePane(pane.index);
+    if (item.is_dir) {
+      void pane.loadPath(item.path, undefined, true, item.path);
+    }
+  }, [setActivePane]);
 
   useEffect(() => {
     isPluginActive.current = true;
@@ -1223,80 +1908,11 @@ if (props.type === "folder") {
     };
   }, []);
 
-  const filteredItems = useMemo(() => {
-    let filtered = items;
+  useEffect(() => {
+    setError(null);
+  }, [activePane.path, setError]);
 
-    if (!showHidden) {
-      filtered = filtered.filter((item) => !item.name.startsWith("."));
-    }
-
-    if (fileTypeFilter === "folders") {
-      filtered = filtered.filter((item) => item.is_dir);
-    } else if (fileTypeFilter === "files") {
-      filtered = filtered.filter((item) => !item.is_dir);
-    }
-
-    return [...filtered].sort((a, b) => {
-      const comparison = a.name.localeCompare(b.name);
-      return sortOrder === "asc" ? comparison : -comparison;
-    });
-  }, [items, showHidden, fileTypeFilter, sortOrder]);
-
-  const fileRows = useMemo(() => {
-    if (loading) return <PanelSectionRow>Carregando...</PanelSectionRow>;
-    if (error) return <PanelSectionRow>{error}</PanelSectionRow>;
-
-    if (!filteredItems.length) return <PanelSectionRow>Pasta vazia.</PanelSectionRow>;
-
-    const visibleItems = filteredItems.slice(0, visibleItemCount);
-    const hasMoreItems = visibleItems.length < filteredItems.length;
-
-    return (
-      <Focusable navEntryPreferPosition={NavEntryPositionPreferences.MAINTAIN_Y}>
-        {visibleItems.map((item) => (
-          <div
-            key={item.path}
-            data-item-path={item.path}
-            ref={(el) => {
-              itemRefs.current[item.path] = el;
-            }}
-          >
-            <PanelSectionRow>
-              <Focusable
-                onActivate={() => {
-                  if (item.is_dir) {
-                    loadPath(item.path, undefined, true, item.path);
-                  }
-                }}
-                onFocus={() => setFocusPath(item.path)}
-              >
-                <ButtonItem
-                  onClick={() => {
-                    if (item.is_dir) {
-                      loadPath(item.path, undefined, true, item.path);
-                    }
-                  }}
-                  layout="below"
-                >
-                  <div style={{ width: "100%", display: "flex", justifyContent: "flex-start", textAlign: "left", alignItems: "center", gap: 10 }}>
-                    {item.is_dir ? <FolderIcon /> : isArchiveFile(item.name) ? <ArchiveIcon /> : <DocumentIcon />}
-                    <span style={{ color: "currentColor", opacity: 0.95 }}>{item.name}</span>
-                  </div>
-                </ButtonItem>
-              </Focusable>
-            </PanelSectionRow>
-          </div>
-        ))}
-        {hasMoreItems ? (
-          <PanelSectionRow>
-            <ButtonItem onClick={() => setVisibleItemCount((count) => count + 150)}>
-              {t("action.show_more").replace("{count}", String(filteredItems.length - visibleItems.length))}
-            </ButtonItem>
-          </PanelSectionRow>
-        ) : null}
-      </Focusable>
-    );
-  }, [loading, error, filteredItems, visibleItemCount, focusPath, loadPath]);
+  const visiblePanes: PaneApi[] = dualPane ? [paneA, paneB] : [activePane];
 
   return (
     <>
@@ -1312,39 +1928,57 @@ if (props.type === "folder") {
         >
           <div ref={fileManagerScopeRef} data-file-manager-scope style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: "100%", padding: "56px 12px 48px", boxSizing: "border-box" }}>
             <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: "100%" }}>
-              <div ref={pathInputScopeRef} data-path-input>
-                <TextField
-                  onFocus={() => {
-                    pathInputFocusedRef.current = true;
-                    pathInputLastFocusRef.current = Date.now();
-                    if (pathInputBlurTimerRef.current !== null) {
-                      window.clearTimeout(pathInputBlurTimerRef.current);
-                      pathInputBlurTimerRef.current = null;
-                    }
-                    stabilizePathInputFocus();
-                  }}
-                  onClick={stabilizePathInputFocus}
-                  onBlur={() => {
-                    if (pathInputBlurTimerRef.current !== null) {
-                      window.clearTimeout(pathInputBlurTimerRef.current);
-                    }
-                    pathInputBlurTimerRef.current = window.setTimeout(() => {
-                      pathInputFocusedRef.current = false;
-                      pathInputBlurTimerRef.current = null;
-                    }, 350);
-                  }}
-                  value={editedPath}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEditedPath(e.currentTarget.value)}
-                  onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      void loadPath(editedPath);
-                    }
-                  }}
-                  bShowCopyAction={false}
-                  tooltip={t("tooltip.currentPath")}
-                  style={{ width: "100%", boxSizing: "border-box", minWidth: 0 }}
-                />
+              <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                {dualPane ? (
+                  <span
+                    style={{
+                      flexShrink: 0,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      letterSpacing: 0.5,
+                      padding: "4px 8px",
+                      borderRadius: 3,
+                      background: "rgba(120,180,255,0.9)",
+                      color: "#0b1622",
+                    }}
+                  >
+                    {activePaneIndex === 0 ? t("panel.left") : t("panel.right")}
+                  </span>
+                ) : null}
+                <div ref={pathInputScopeRef} data-path-input style={{ flex: 1, minWidth: 0 }}>
+                  <TextField
+                    onFocus={() => {
+                      pathInputFocusedRef.current = true;
+                      pathInputLastFocusRef.current = Date.now();
+                      if (pathInputBlurTimerRef.current !== null) {
+                        window.clearTimeout(pathInputBlurTimerRef.current);
+                        pathInputBlurTimerRef.current = null;
+                      }
+                      stabilizePathInputFocus();
+                    }}
+                    onClick={stabilizePathInputFocus}
+                    onBlur={() => {
+                      if (pathInputBlurTimerRef.current !== null) {
+                        window.clearTimeout(pathInputBlurTimerRef.current);
+                      }
+                      pathInputBlurTimerRef.current = window.setTimeout(() => {
+                        pathInputFocusedRef.current = false;
+                        pathInputBlurTimerRef.current = null;
+                      }, 350);
+                    }}
+                    value={activePane.editedPath}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => activePane.setEditedPath(e.currentTarget.value)}
+                    onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        void activePane.loadPath(activePane.editedPath);
+                      }
+                    }}
+                    bShowCopyAction={false}
+                    tooltip={t("tooltip.currentPath")}
+                    style={{ width: "100%", boxSizing: "border-box", minWidth: 0 }}
+                  />
+                </div>
               </div>
 
               <div style={{ width: "100%", padding: "8px 0", boxSizing: "border-box", minWidth: 0 }}>
@@ -1358,6 +1992,15 @@ if (props.type === "folder") {
                         label={t("label.hidden")}
                         checked={showHidden}
                         onChange={(v: boolean) => setShowHidden(v)}
+                      />
+                    </div>
+                  </div>
+                  <div style={{ flex: "1 1 0%", minWidth: 0, display: "flex", alignItems: "center", justifyContent: "flex-start", padding: "0" }}>
+                    <div style={{ width: "100%", minWidth: 0 }}>
+                      <ToggleField
+                        label={t("label.split_view")}
+                        checked={dualPane}
+                        onChange={(v: boolean) => setDualPane(v)}
                       />
                     </div>
                   </div>
@@ -1391,21 +2034,42 @@ if (props.type === "folder") {
                 </Focusable>
               </div>
 
-              <div
-                ref={listContainerRef}
-                onScroll={(event) => {
-                  const element = event.currentTarget;
-                  if (element.scrollTop + element.clientHeight >= element.scrollHeight - 160) {
-                    setVisibleItemCount((count) => Math.min(count + 150, filteredItems.length));
-                  }
-                }}
-                style={{ flex: 1, minHeight: 0, overflowY: "auto", paddingBottom: 48, boxSizing: "border-box" }}
+              <DrivesBar drives={drives} currentPath={activePane.path} onSelect={goToDrive} />
+
+              {error ? (
+                <div
+                  style={{
+                    margin: "0 0 8px",
+                    padding: "6px 10px",
+                    borderRadius: 4,
+                    fontSize: 12,
+                    background: "rgba(220,80,80,0.15)",
+                    border: "1px solid rgba(220,80,80,0.4)",
+                  }}
+                >
+                  {error}
+                </div>
+              ) : null}
+
+              <Focusable
+                navEntryPreferPosition={NavEntryPositionPreferences.MAINTAIN_X}
+                style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "row", gap: 8, alignItems: "stretch" }}
               >
-                <PanelSection title={t("panel.files")}>
-                  {fileRows}
-                </PanelSection>
-                <div style={{ height: 48, flexShrink: 0 }} />
-              </div>
+                {visiblePanes.map((pane) => (
+                  <PaneView
+                    key={pane.index}
+                    pane={pane}
+                    dual={dualPane}
+                    active={pane.index === activePaneIndex}
+                    showHidden={showHidden}
+                    sortOrder={sortOrder}
+                    fileTypeFilter={fileTypeFilter}
+                    onPaneFocus={setActivePane}
+                    onOpenDir={handleOpenDir}
+                    registerContainer={registerPaneContainer}
+                  />
+                ))}
+              </Focusable>
             </div>
           </div>
         </Focusable>
@@ -1526,7 +2190,7 @@ if (props.type === "folder") {
                       <Focusable navEntryPreferPosition={NavEntryPositionPreferences.MAINTAIN_X}>
                         <div style={{ width: "100%" }}>
                           <DialogButton ref={createFolderConfirmRef as any} onClick={async () => {
-                            await handleCreateFolder(pathRef.current, createFolderName);
+                            await handleCreateFolder(panesRef.current[activePaneIndexRef.current].pathRef.current, createFolderName);
                           }}>
                             {t("action.create")}
                           </DialogButton>
@@ -1577,14 +2241,7 @@ if (props.type === "folder") {
                           <DialogButton ref={deleteConfirmRef as any} onClick={async () => {
                             if (!deleteTarget) return;
                             await runOperation(t("action.deleting"), () => deletePath(deleteTarget), {
-                              onError: (e) => {
-                                const message = String(e?.message ?? t("error.could_not_delete"));
-                                if (message.toLowerCase().includes("permissão")) {
-                                  setPermissionModal({ message: t("permission.denied") });
-                                } else {
-                                  setError(message);
-                                }
-                              },
+                              onError: (e) => handleOperationError(e, "error.could_not_delete"),
                             });
                             setDeleteRequested(false);
                             setDeleteTarget(null);
@@ -1628,6 +2285,7 @@ if (props.type === "folder") {
                     </div>
                     <div style={{ padding: "6px 0", textAlign: "center" }}>
                       <div>{conflictModal.message}</div>
+                      <div style={{ fontSize: 12, opacity: 0.6, marginTop: 6 }}>{conflictModal.targetDir}</div>
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 12, width: "100%", marginTop: 16 }}>
                       {conflictModal.isFolderConflict ? (
@@ -1767,51 +2425,61 @@ if (props.type === "folder") {
           height: 60,
           display: "flex",
           alignItems: "center",
-          justifyContent: "flex-end",
+          justifyContent: "space-between",
           gap: 24,
+          paddingLeft: 24,
           paddingRight: 24,
           pointerEvents: "none",
           zIndex: 999,
         }}
       >
-        <div
-          style={{
-            width: 80,
-            height: 60,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            cursor: "pointer",
-            pointerEvents: "auto",
-          }}
-          onClick={handleFooterCircle}
-        />
+        {!hasActiveModal ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 14, fontSize: 11, opacity: 0.55, whiteSpace: "nowrap", overflow: "hidden" }}>
+            <span>{`X · ${dualPane ? t("hint.split_close") : t("hint.split_open")}`}</span>
+            {dualPane ? <span>{`L1 / R1 · ${t("hint.switch_panel")}`}</span> : null}
+          </div>
+        ) : <div />}
 
-        <div
-          style={{
-            width: 80,
-            height: 60,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            cursor: "pointer",
-            pointerEvents: "auto",
-          }}
-          onClick={handleFooterTriangle}
-        />
+        <div style={{ display: "flex", alignItems: "center", gap: 24 }}>
+          <div
+            style={{
+              width: 80,
+              height: 60,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+              pointerEvents: "auto",
+            }}
+            onClick={handleFooterCircle}
+          />
 
-        <div
-          style={{
-            width: 80,
-            height: 60,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            cursor: "pointer",
-            pointerEvents: "auto",
-          }}
-          onClick={handleFooterCross}
-        />
+          <div
+            style={{
+              width: 80,
+              height: 60,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+              pointerEvents: "auto",
+            }}
+            onClick={handleFooterTriangle}
+          />
+
+          <div
+            style={{
+              width: 80,
+              height: 60,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+              pointerEvents: "auto",
+            }}
+            onClick={handleFooterCross}
+          />
+        </div>
       </div>
     </>
   );
@@ -1820,7 +2488,7 @@ if (props.type === "folder") {
 function Content() {
   const openFullScreen = useCallback(() => {
     Router.CloseSideMenus();
-    Router.Navigate?.("/steam-os-file-manager");
+    Router.Navigate?.("/decky-file-manager");
   }, []);
 
   return (
@@ -1840,11 +2508,11 @@ function Content() {
   );
 }
 
-routerHook.addRoute("/steam-os-file-manager", FileManagerPage);
+routerHook.addRoute("/decky-file-manager", FileManagerPage);
 
 export default definePlugin(() => {
   return {
-    name: "Decky Manager",
+    name: "Decky File Manager",
     content: <Content />,
     icon: <PluginIcon />,
   };

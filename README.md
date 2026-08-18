@@ -1,5 +1,9 @@
 # Decky File Manager
 
+[![Support me on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/danielcamilo)
+
+> This is a fork of [Ciphay/Decky-File-Manager](https://github.com/Ciphay/Decky-File-Manager), continuing the original plugin with additional features. All credit for the original work goes to [Ciphay](https://github.com/Ciphay).
+
 Decky File Manager is a native file manager plugin for SteamOS Gaming Mode, designed to provide a seamless and controller-friendly experience directly within the Steam interface.
 
 Manage your files and folders without leaving Gaming Mode. Browse directories, copy, move, rename, and delete files using an intuitive interface inspired by SteamOS, making file management feel like a natural part of the console experience.
@@ -23,19 +27,62 @@ Manage your files and folders without leaving Gaming Mode. Browse directories, c
 
 * Native Gaming Mode integration.
 * Full controller navigation support.
+* **Dual-panel (split) view** — browse two folders side by side.
+* **Copy and move directly between panels**, the way desktop file managers work.
+* **Quick access to connected drives** — SD card, USB sticks and external drives.
 * File and folder management.
 * Copy, move, rename, and delete operations.
+* Archive extraction (zip, tar and variants).
 * Multi-language support.
 * Designed for SteamOS and Bazzite.
 * Lightweight and easy to use.
 * SteamOS-inspired user interface.
+
+## Split view
+
+Open a second panel and work between two folders at once, instead of copying something, navigating away, and pasting.
+
+* Press **X**, or use the **Split** toggle in the toolbar, to open and close the split.
+* Press **L1** / **R1** to move between the left and right panel. The **D-pad** also crosses between them at the edge of a list.
+* The active panel is highlighted, and the path field and every action follow it — so there is never any doubt about which side you are working on.
+* Opening the split clones the current folder into the new panel once; after that each panel keeps its own location.
+
+With the split open, the **Y** options menu gains **Copy to other panel** and **Move to other panel**, which transfer straight to the other side without touching the clipboard.
+
+## Drives
+
+Connected drives appear as a row of shortcuts above the file list, each showing its free space, with the drive you are currently browsing highlighted. They are also listed in the **Y** options menu when no file is selected.
+
+Only drives worth navigating to are listed — SD cards, USB storage, external and secondary drives — along with **Home** and the filesystem **root**. System and OS partitions are deliberately filtered out.
+
+## Controls
+
+| Button | Action |
+| --- | --- |
+| **A** | Open folder |
+| **B** | Go up one directory (hold to exit the plugin) |
+| **X** | Toggle split view |
+| **Y** | Options menu |
+| **L1** / **R1** | Switch to the left / right panel |
+| **D-pad** | Navigate, and move between panels |
+
+## Installation
+
+Download the latest `decky-file-manager.zip` from the [releases](https://github.com/danielcamilo1/Decky-File-Manager/releases) page and install it through Decky Loader's **Install from zip** option, with developer mode enabled.
+
+## Support
+
+This plugin is free and open source, and it will stay that way. If it saved you a trip to Desktop Mode and you feel like saying thanks, you can buy me a coffee — it is genuinely appreciated and it keeps the updates coming ☕
+
+[![Buy me a coffee at ko-fi.com](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/danielcamilo)
+
+Starring the repo, reporting a bug or suggesting a feature helps just as much — and costs nothing.
 
 Decky File Manager was created to fill the gap of native file management in Gaming Mode, bringing the convenience of desktop file managers to a console-like environment without sacrificing usability or immersion.
 
 > **Beta Notice:** Decky File Manager is currently in beta. The plugin is fully functional, but new features, performance improvements, and interface refinements are actively being developed, including:
 > * Integration with "browse" button on game properties.
 > * Sudo operations.
-> * Add non-steam games.
 >   
 
 ## License
