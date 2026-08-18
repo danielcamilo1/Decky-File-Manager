@@ -6,3 +6,8 @@ __pycache__/
 *~
 *.log
 *.tmp
+# Dependencies and build output
+node_modules/
+dist/
+*.zip
+.tmp/
