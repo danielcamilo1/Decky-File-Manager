@@ -118,5 +118,11 @@
   "editor.reload": "Reload",
   "error.could_not_open_file": "Could not open file.",
   "error.could_not_save_file": "Could not save file.",
-  "error.could_not_create_file": "Could not create file."
+  "error.could_not_create_file": "Could not create file.",
+  "menu.recent": "Recent folders",
+  "modal.recent": "Recent folders",
+  "recent.empty": "No folders visited yet.",
+  "recent.clear": "Clear history",
+  "editor.error_binary": "This file is not text and cannot be edited.",
+  "editor.error_too_large": "This file is too large to edit (limit 1 MB)."
 }

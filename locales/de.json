@@ -118,5 +118,11 @@
   "editor.reload": "Neu laden",
   "error.could_not_open_file": "Datei konnte nicht geöffnet werden.",
   "error.could_not_save_file": "Datei konnte nicht gespeichert werden.",
-  "error.could_not_create_file": "Datei konnte nicht erstellt werden."
+  "error.could_not_create_file": "Datei konnte nicht erstellt werden.",
+  "menu.recent": "Zuletzt besuchte Ordner",
+  "modal.recent": "Zuletzt besuchte Ordner",
+  "recent.empty": "Noch keine Ordner besucht.",
+  "recent.clear": "Verlauf löschen",
+  "editor.error_binary": "Diese Datei ist kein Text und kann nicht bearbeitet werden.",
+  "editor.error_too_large": "Diese Datei ist zu groß zum Bearbeiten (Grenze 1 MB)."
 }

@@ -118,5 +118,11 @@
   "editor.reload": "重新加载",
   "error.could_not_open_file": "无法打开文件。",
   "error.could_not_save_file": "无法保存文件。",
-  "error.could_not_create_file": "无法创建文件。"
+  "error.could_not_create_file": "无法创建文件。",
+  "menu.recent": "最近的文件夹",
+  "modal.recent": "最近的文件夹",
+  "recent.empty": "尚未访问任何文件夹。",
+  "recent.clear": "清除历史记录",
+  "editor.error_binary": "此文件不是文本，无法编辑。",
+  "editor.error_too_large": "此文件过大，无法编辑（上限 1 MB）。"
 }
