@@ -258,6 +258,24 @@ function RenameIcon() {
   );
 }
 
+function EditIcon() {
+  return (
+    <BaseIcon>
+      <path d="M21.731 2.269a2.625 2.625 0 0 0-3.712 0l-1.157 1.157 3.712 3.712 1.157-1.157a2.625 2.625 0 0 0 0-3.712ZM19.513 8.199l-3.712-3.712-8.4 8.4a5.25 5.25 0 0 0-1.32 2.214l-.8 2.685a.75.75 0 0 0 .933.933l2.685-.8a5.25 5.25 0 0 0 2.214-1.32l8.4-8.4Z" />
+      <path fillRule="evenodd" d="M2.25 20.25a.75.75 0 0 1 .75-.75h18a.75.75 0 0 1 0 1.5H3a.75.75 0 0 1-.75-.75Z" clipRule="evenodd" />
+    </BaseIcon>
+  );
+}
+
+function NewFileIcon() {
+  return (
+    <BaseIcon>
+      <path d="M5.625 1.5c-1.036 0-1.875.84-1.875 1.875v17.25c0 1.035.84 1.875 1.875 1.875h12.75c1.035 0 1.875-.84 1.875-1.875V12.75A3.75 3.75 0 0 0 16.5 9h-1.875a1.875 1.875 0 0 1-1.875-1.875V5.25A3.75 3.75 0 0 0 9 1.5H5.625ZM12.75 12a.75.75 0 0 0-1.5 0v2.25H9a.75.75 0 0 0 0 1.5h2.25V18a.75.75 0 0 0 1.5 0v-2.25H15a.75.75 0 0 0 0-1.5h-2.25V12Z" />
+      <path d="M14.25 5.25a5.23 5.23 0 0 0-1.279-3.434 9.768 9.768 0 0 1 6.963 6.963A5.23 5.23 0 0 0 16.5 7.5h-1.875a.375.375 0 0 1-.375-.375V5.25Z" />
+    </BaseIcon>
+  );
+}
+
 function DeleteIcon() {
   return (
     <BaseIcon>
@@ -369,6 +387,41 @@ function isArchiveFile(name: string): boolean {
     ".iso",
   ];
   return archiveExtensions.some((ext) => lower.endsWith(ext));
+}
+
+/**
+ * Which files the A button opens straight in the editor. The backend is the
+ * real gate — it refuses anything binary or oversized — so this list only has
+ * to cover what a Deck user plausibly wants to edit by hand.
+ */
+const TEXT_EXTENSIONS = [
+  ".txt", ".md", ".markdown", ".log", ".cfg", ".conf", ".config", ".ini", ".json",
+  ".yaml", ".yml", ".toml", ".xml", ".csv", ".tsv", ".env", ".properties",
+  ".sh", ".bash", ".zsh", ".fish", ".py", ".js", ".mjs", ".cjs", ".ts", ".tsx",
+  ".jsx", ".css", ".scss", ".html", ".htm", ".sql", ".lua", ".vdf", ".acf",
+  ".desktop", ".service", ".rules", ".list", ".patch", ".diff", ".gitignore",
+  ".reg", ".bat", ".ps1", ".c", ".h", ".cpp", ".hpp", ".rs", ".go", ".java",
+];
+
+const TEXT_FILENAMES = [
+  "makefile", "dockerfile", "readme", "license", "changelog", "authors",
+  "hosts", "fstab", "environment", "profile", "bashrc", "zshrc",
+];
+
+function isTextFile(name: string): boolean {
+  const lower = name.toLowerCase();
+  if (TEXT_FILENAMES.includes(lower)) return true;
+  if (lower.startsWith(".") && !lower.slice(1).includes(".")) return true; // dotfiles: .bashrc, .gitignore
+  return TEXT_EXTENSIONS.some((ext) => lower.endsWith(ext));
+}
+
+function countLines(text: string): number {
+  if (!text) return 1;
+  let lines = 1;
+  for (let i = 0; i < text.length; i += 1) {
+    if (text.charCodeAt(i) === 10) lines += 1;
+  }
+  return lines;
 }
 
 function formatBytes(bytes: number): string {
@@ -1042,6 +1095,24 @@ function FileManagerPage() {
     permissions: string;
   }>("get_properties");
   const getDirectorySize = callable<[string], { size: number | null; path: string }>("get_directory_size");
+  const readTextFile = callable<[string], {
+    path: string;
+    name: string;
+    content: string;
+    encoding: string;
+    size: number;
+    modified: number;
+    read_only: boolean;
+  }>("read_text_file");
+  const writeTextFile = callable<[string, string, number, string, boolean], {
+    success: boolean;
+    stale?: boolean;
+    path: string;
+    size?: number;
+    modified: number;
+    encoding?: string;
+  }>("write_text_file");
+  const createFileCallable = callable<[string, string], { success: boolean; path?: string; new_path?: string }>("create_file");
 
   const [clipboardHas, setClipboardHas] = useState(false);
   const [error, setErrorState] = useState<string | null>(null);
@@ -1094,12 +1165,34 @@ function FileManagerPage() {
   const conflictPrimaryRef = useRef<HTMLButtonElement | null>(null);
   const permissionPrimaryRef = useRef<HTMLButtonElement | null>(null);
 
+  const [editorRequested, setEditorRequested] = useState(false);
+  const [editorPath, setEditorPath] = useState<string | null>(null);
+  const [editorName, setEditorName] = useState<string>("");
+  const [editorContent, setEditorContent] = useState<string>("");
+  const [editorOriginal, setEditorOriginal] = useState<string>("");
+  const [editorEncoding, setEditorEncoding] = useState<string>("utf-8");
+  const [editorModified, setEditorModified] = useState<number>(0);
+  const [editorReadOnly, setEditorReadOnly] = useState(false);
+  const [editorLoading, setEditorLoading] = useState(false);
+  const [editorSaving, setEditorSaving] = useState(false);
+  const [editorSaved, setEditorSaved] = useState(false);
+  const [editorError, setEditorError] = useState<string | null>(null);
+  const [editorStale, setEditorStale] = useState(false);
+  const [editorDiscardPrompt, setEditorDiscardPrompt] = useState(false);
+  const [editorWrap, setEditorWrap] = useState(true);
+  const editorAreaRef = useRef<HTMLTextAreaElement | null>(null);
+  const editorDirty = editorContent !== editorOriginal;
+
   const [createFolderRequested, setCreateFolderRequested] = useState(false);
   const [createFolderName, setCreateFolderName] = useState("");
   const createFolderRef = useRef<HTMLDivElement | null>(null);
   const createFolderConfirmRef = useRef<HTMLButtonElement | null>(null);
+  const [createFileRequested, setCreateFileRequested] = useState(false);
+  const [createFileName, setCreateFileName] = useState("");
+  const createFileRef = useRef<HTMLDivElement | null>(null);
+  const createFileConfirmRef = useRef<HTMLButtonElement | null>(null);
   const fileManagerScopeRef = useRef<HTMLDivElement | null>(null);
-  const hasActiveModal = renameRequested || deleteRequested || propertiesRequested || createFolderRequested || !!conflictModal || !!operationModal || !!permissionModal;
+  const hasActiveModal = renameRequested || deleteRequested || propertiesRequested || createFolderRequested || createFileRequested || editorRequested || !!conflictModal || !!operationModal || !!permissionModal;
   hasActiveModalRef.current = hasActiveModal;
 
   const isDropdownMenuOpenInDom = useCallback(() => {
@@ -1236,8 +1329,8 @@ function FileManagerPage() {
       }
     }
 
-    return propertiesRequested || renameRequested || deleteRequested || createFolderRequested || !!conflictModal || !!operationModal || !!permissionModal;
-  }, [propertiesRequested, renameRequested, deleteRequested, createFolderRequested, conflictModal, operationModal, permissionModal]);
+    return propertiesRequested || renameRequested || deleteRequested || createFolderRequested || createFileRequested || editorRequested || !!conflictModal || !!operationModal || !!permissionModal;
+  }, [propertiesRequested, renameRequested, deleteRequested, createFolderRequested, createFileRequested, editorRequested, conflictModal, operationModal, permissionModal]);
 
   useEffect(() => {
     const input = (window as any).SteamClient?.Input;
@@ -1282,7 +1375,10 @@ function FileManagerPage() {
 
             const activeElement = document.activeElement as HTMLElement | null;
             const pathInputWasRecentlyFocused = Date.now() - pathInputLastFocusRef.current < 3000;
-            if (pathInputFocusedRef.current || pathInputWasRecentlyFocused || (activeElement instanceof HTMLElement && activeElement.closest("[data-path-input]"))) {
+            // While a modal is up the path field is inert and cannot hold
+            // focus, so blurring it would only swallow the press that is
+            // meant to dismiss the modal.
+            if (!hasActiveModalRef.current && (pathInputFocusedRef.current || pathInputWasRecentlyFocused || (activeElement instanceof HTMLElement && activeElement.closest("[data-path-input]")))) {
               pathInputFocusedRef.current = false;
               pathInputLastFocusRef.current = 0;
               if (pathInputBlurTimerRef.current !== null) {
@@ -1434,6 +1530,31 @@ function FileManagerPage() {
       }, 50);
     }
   }, [deleteRequested]);
+
+  useEffect(() => {
+    if (createFileRequested) {
+      setTimeout(() => {
+        const input = createFileRef.current?.querySelector<HTMLInputElement>("input");
+        input?.focus();
+        // A new file is almost always "name.ext"; put the caret before the
+        // extension so typing replaces the stem rather than appending to it.
+        input?.select();
+      }, 50);
+    }
+  }, [createFileRequested]);
+
+  // The textarea is what the user came for, so it takes focus as soon as the
+  // content is in; before that it is read-only and focusing it does nothing.
+  useEffect(() => {
+    if (!editorRequested || editorLoading) return;
+    const timeout = window.setTimeout(() => {
+      try {
+        editorAreaRef.current?.focus();
+      } catch {
+      }
+    }, 60);
+    return () => window.clearTimeout(timeout);
+  }, [editorRequested, editorLoading]);
 
   useEffect(() => {
     if (!conflictModal) return;
@@ -1621,6 +1742,139 @@ function FileManagerPage() {
     setCreateFolderName("");
   }, [createFolderCallable, runOperation, setError]);
 
+  const handleCreateFile = useCallback(async (parentDir: string, name: string) => {
+    if (!name) return setError(t("error.invalid_name"));
+    await runOperation(t("action.creating_file"), () => createFileCallable(parentDir, name), {
+      onError: (e) => {
+        setError(e?.message ?? t("error.could_not_create_file"));
+      },
+    });
+    setCreateFileRequested(false);
+    setCreateFileName("");
+  }, [createFileCallable, runOperation, setError]);
+
+  /**
+   * The backend raises Portuguese messages; inside the editor a permission
+   * problem is shown in the modal itself rather than stacking a second
+   * ModalRoot on top of the one the user is looking at.
+   */
+  const editorErrorMessage = useCallback((e: any, fallbackKey: string) => {
+    const message = String(e?.message ?? t(fallbackKey));
+    return message.toLowerCase().includes("permissão") ? t("permission.denied") : message;
+  }, []);
+
+  const openEditor = useCallback((item: FileEntry) => {
+    setEditorRequested(true);
+    setEditorPath(item.path);
+    setEditorName(item.name);
+    setEditorContent("");
+    setEditorOriginal("");
+    setEditorEncoding("utf-8");
+    setEditorModified(0);
+    setEditorReadOnly(false);
+    setEditorError(null);
+    setEditorStale(false);
+    setEditorSaved(false);
+    setEditorDiscardPrompt(false);
+    setEditorLoading(true);
+
+    void (async () => {
+      try {
+        const res = await readTextFile(item.path);
+        setEditorContent(res.content);
+        setEditorOriginal(res.content);
+        setEditorEncoding(res.encoding);
+        setEditorModified(res.modified);
+        setEditorReadOnly(res.read_only);
+      } catch (e: any) {
+        setEditorError(editorErrorMessage(e, "error.could_not_open_file"));
+      } finally {
+        setEditorLoading(false);
+      }
+    })();
+  }, [readTextFile, editorErrorMessage]);
+
+  const closeEditor = useCallback(() => {
+    setEditorRequested(false);
+    setEditorPath(null);
+    setEditorName("");
+    setEditorContent("");
+    setEditorOriginal("");
+    setEditorError(null);
+    setEditorStale(false);
+    setEditorSaved(false);
+    setEditorDiscardPrompt(false);
+    setEditorLoading(false);
+  }, []);
+
+  /** B / Close: never throw away edits without asking first. */
+  const requestCloseEditor = useCallback(() => {
+    if (editorDiscardPrompt) {
+      setEditorDiscardPrompt(false);
+      return;
+    }
+    if (editorDirty && !editorLoading) {
+      setEditorDiscardPrompt(true);
+      return;
+    }
+    closeEditor();
+  }, [closeEditor, editorDirty, editorDiscardPrompt, editorLoading]);
+
+  const handleSaveFile = useCallback(async (force = false) => {
+    if (!editorPath || editorSaving) return;
+
+    setEditorSaving(true);
+    setEditorError(null);
+
+    try {
+      const res = await writeTextFile(editorPath, editorContent, editorModified, editorEncoding, force);
+
+      // The file moved under us since it was opened: let the user decide
+      // between clobbering the other change and reloading it.
+      if (!res.success) {
+        if (res.stale) {
+          setEditorStale(true);
+          return false;
+        }
+        throw new Error(t("error.could_not_save_file"));
+      }
+
+      setEditorOriginal(editorContent);
+      setEditorModified(res.modified);
+      if (res.encoding) setEditorEncoding(res.encoding);
+      setEditorStale(false);
+      setEditorSaved(true);
+      window.setTimeout(() => setEditorSaved(false), 2000);
+      void refreshPanes();
+      return true;
+    } catch (e: any) {
+      setEditorError(editorErrorMessage(e, "error.could_not_save_file"));
+      return false;
+    } finally {
+      setEditorSaving(false);
+    }
+  }, [editorContent, editorEncoding, editorModified, editorPath, editorSaving, editorErrorMessage, refreshPanes, writeTextFile]);
+
+  /** Throw away the buffer and take whatever is on disk now. */
+  const reloadEditor = useCallback(async () => {
+    if (!editorPath) return;
+    setEditorLoading(true);
+    setEditorError(null);
+    setEditorStale(false);
+    try {
+      const res = await readTextFile(editorPath);
+      setEditorContent(res.content);
+      setEditorOriginal(res.content);
+      setEditorEncoding(res.encoding);
+      setEditorModified(res.modified);
+      setEditorReadOnly(res.read_only);
+    } catch (e: any) {
+      setEditorError(editorErrorMessage(e, "error.could_not_open_file"));
+    } finally {
+      setEditorLoading(false);
+    }
+  }, [editorPath, readTextFile, editorErrorMessage]);
+
   const handleConflictChoice = useCallback(async (strategy: string, applyToAll = false) => {
     if (!conflictModal) return;
 
@@ -1704,6 +1958,16 @@ function FileManagerPage() {
         };
         const copyToOther = () => void handleTransferToOtherPane(item, "copy");
         const moveToOther = () => void handleTransferToOtherPane(item, "cut");
+        const edit = () => {
+          // The menu lives in its own React root that Steam tears down
+          // synchronously on activation; opening the modal on the next tick
+          // keeps the state update from being dropped mid-teardown.
+          if (contextMenuInstance.current) {
+            contextMenuInstance.current.Hide();
+            contextMenuInstance.current = null;
+          }
+          window.setTimeout(() => openEditor(item), 0);
+        };
         const rename = () => {
           setRenameTarget(item.path);
           setRenameValue(item.name);
@@ -1766,6 +2030,13 @@ function FileManagerPage() {
             ) : null}
             {splitOn ? <MenuSeparator /> : null}
 
+            {!item.is_dir ? <MenuSeparator /> : null}
+            {!item.is_dir ? (
+              <MenuItem onClick={edit} onSelected={edit}>
+                <span style={{ display: "flex", alignItems: "center", gap: 10 }}><EditIcon />{t("menu.edit")}</span>
+              </MenuItem>
+            ) : null}
+
             {isArchiveFile(item.name) ? (
               <MenuItem onClick={() => void extract()} onSelected={() => void extract()}>
                 <span style={{ display: "flex", alignItems: "center", gap: 10 }}><ExtractIcon />{t("menu.extract")}</span>
@@ -1774,6 +2045,10 @@ function FileManagerPage() {
 
             <MenuItem onClick={() => setCreateFolderRequested(true)} onSelected={() => setCreateFolderRequested(true)}>
               <span style={{ display: "flex", alignItems: "center", gap: 10 }}><NewFolderIcon />{t("menu.newFolder")}</span>
+            </MenuItem>
+
+            <MenuItem onClick={() => setCreateFileRequested(true)} onSelected={() => setCreateFileRequested(true)}>
+              <span style={{ display: "flex", alignItems: "center", gap: 10 }}><NewFileIcon />{t("menu.newFile")}</span>
             </MenuItem>
 
             <MenuItem onClick={toggleSplit} onSelected={toggleSplit}>
@@ -1802,6 +2077,9 @@ function FileManagerPage() {
             {clipboardHas ? <MenuItem onClick={paste} onSelected={paste}><span style={{ display: "flex", alignItems: "center", gap: 10 }}><PasteIcon />{t("menu.paste")}</span></MenuItem> : null}
             <MenuItem onClick={() => setCreateFolderRequested(true)} onSelected={() => setCreateFolderRequested(true)}>
               <span style={{ display: "flex", alignItems: "center", gap: 10 }}><NewFolderIcon />{t("menu.newFolder")}</span>
+            </MenuItem>
+            <MenuItem onClick={() => setCreateFileRequested(true)} onSelected={() => setCreateFileRequested(true)}>
+              <span style={{ display: "flex", alignItems: "center", gap: 10 }}><NewFileIcon />{t("menu.newFile")}</span>
             </MenuItem>
             <MenuItem onClick={toggleSplit} onSelected={toggleSplit}>
               <span style={{ display: "flex", alignItems: "center", gap: 10 }}><SplitViewIcon />{splitOn ? t("menu.split_view_close") : t("menu.split_view")}</span>
@@ -1833,6 +2111,7 @@ function FileManagerPage() {
       handleOperationError,
       handlePaste,
       handleTransferToOtherPane,
+      openEditor,
       refreshClipboard,
       renamePath,
       runOperation,
@@ -1898,8 +2177,14 @@ function FileManagerPage() {
     setActivePane(pane.index);
     if (item.is_dir) {
       void pane.loadPath(item.path, undefined, true, item.path);
+      return;
     }
-  }, [setActivePane]);
+    // Archives already have their own action in the menu; everything that
+    // looks like text opens in the editor so A does something useful on it.
+    if (!isArchiveFile(item.name) && isTextFile(item.name)) {
+      openEditor(item);
+    }
+  }, [setActivePane, openEditor]);
 
   useEffect(() => {
     isPluginActive.current = true;
@@ -2201,6 +2486,209 @@ function FileManagerPage() {
                           <DialogButton onClick={() => { setCreateFolderRequested(false); setCreateFolderName(""); }}>
                             {t("action.cancel")}
                           </DialogButton>
+                        </div>
+                      </Focusable>
+                    </div>
+                  </Focusable>
+                </ModalFocusScope>
+              </DialogBody>
+            </ModalRoot>
+          )}
+
+          {createFileRequested && (
+            <ModalRoot
+              show={true}
+              bDisableBackgroundDismiss={true}
+              bHideMainWindowForPopouts={true}
+              onCancel={() => { setCreateFileRequested(false); setCreateFileName(""); }}
+            >
+              <DialogBody>
+                <ModalFocusScope>
+                  <Focusable
+                    navEntryPreferPosition={NavEntryPositionPreferences.MAINTAIN_X}
+                    onCancel={() => { setCreateFileRequested(false); setCreateFileName(""); }}
+                    onCancelButton={() => { setCreateFileRequested(false); setCreateFileName(""); }}
+                    style={{ outline: "none", display: "flex", flexDirection: "column", alignItems: "stretch" }}
+                  >
+                    <div style={{ textAlign: "center", padding: "6px 0 12px" }}>
+                      <h1 style={{ margin: 0 }}>{t("modal.new_file")}</h1>
+                    </div>
+
+                    <div ref={createFileRef} style={{ padding: "6px 0" }}>
+                      <TextField
+                        value={createFileName}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCreateFileName(e.currentTarget.value)}
+                        bShowCopyAction={false}
+                        autoFocus
+                      />
+                    </div>
+
+                    <div style={{ display: "flex", flexDirection: "column", gap: 12, width: "100%", marginTop: 16 }}>
+                      <Focusable navEntryPreferPosition={NavEntryPositionPreferences.MAINTAIN_X}>
+                        <div style={{ width: "100%" }}>
+                          <DialogButton ref={createFileConfirmRef as any} onClick={async () => {
+                            await handleCreateFile(panesRef.current[activePaneIndexRef.current].pathRef.current, createFileName);
+                          }}>
+                            {t("action.create")}
+                          </DialogButton>
+                        </div>
+                      </Focusable>
+                      <Focusable navEntryPreferPosition={NavEntryPositionPreferences.MAINTAIN_X}>
+                        <div style={{ width: "100%" }}>
+                          <DialogButton onClick={() => { setCreateFileRequested(false); setCreateFileName(""); }}>
+                            {t("action.cancel")}
+                          </DialogButton>
+                        </div>
+                      </Focusable>
+                    </div>
+                  </Focusable>
+                </ModalFocusScope>
+              </DialogBody>
+            </ModalRoot>
+          )}
+
+          {editorRequested && (
+            <ModalRoot
+              show={true}
+              bDisableBackgroundDismiss={true}
+              bHideMainWindowForPopouts={true}
+              onCancel={requestCloseEditor}
+            >
+              <DialogBody>
+                <ModalFocusScope>
+                  <Focusable
+                    navEntryPreferPosition={NavEntryPositionPreferences.MAINTAIN_X}
+                    onCancel={requestCloseEditor}
+                    onCancelButton={requestCloseEditor}
+                    style={{ outline: "none", display: "flex", flexDirection: "column", alignItems: "stretch", minWidth: 0 }}
+                  >
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 10, padding: "2px 0 10px", minWidth: 0 }}>
+                      <h1 style={{ margin: 0, fontSize: 20, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
+                        {editorName}
+                      </h1>
+                      <span style={{ fontSize: 12, opacity: 0.55, flexShrink: 0 }}>
+                        {editorReadOnly ? t("editor.read_only") : editorDirty ? t("editor.unsaved") : editorSaved ? t("editor.saved") : editorEncoding}
+                      </span>
+                    </div>
+
+                    {editorError ? (
+                      <div
+                        style={{
+                          margin: "0 0 10px",
+                          padding: "6px 10px",
+                          borderRadius: 4,
+                          fontSize: 12,
+                          background: "rgba(220,80,80,0.15)",
+                          border: "1px solid rgba(220,80,80,0.4)",
+                        }}
+                      >
+                        {editorError}
+                      </div>
+                    ) : null}
+
+                    {editorStale ? (
+                      <div
+                        style={{
+                          margin: "0 0 10px",
+                          padding: "8px 10px",
+                          borderRadius: 4,
+                          fontSize: 12,
+                          background: "rgba(230,170,60,0.15)",
+                          border: "1px solid rgba(230,170,60,0.45)",
+                        }}
+                      >
+                        <div style={{ marginBottom: 8 }}>{t("editor.stale_message").replace("{name}", editorName)}</div>
+                        <Focusable style={{ display: "flex", gap: 8 }}>
+                          <DialogButton style={{ flex: 1 }} onClick={() => void handleSaveFile(true)}>{t("editor.overwrite")}</DialogButton>
+                          <DialogButton style={{ flex: 1 }} onClick={() => void reloadEditor()}>{t("editor.reload")}</DialogButton>
+                        </Focusable>
+                      </div>
+                    ) : null}
+
+                    {editorDiscardPrompt ? (
+                      <div
+                        style={{
+                          margin: "0 0 10px",
+                          padding: "8px 10px",
+                          borderRadius: 4,
+                          fontSize: 12,
+                          background: "rgba(220,80,80,0.12)",
+                          border: "1px solid rgba(220,80,80,0.4)",
+                        }}
+                      >
+                        <div style={{ marginBottom: 8 }}>{t("editor.discard_message").replace("{name}", editorName)}</div>
+                        <Focusable style={{ display: "flex", gap: 8 }}>
+                          <DialogButton style={{ flex: 1 }} onClick={() => setEditorDiscardPrompt(false)}>{t("editor.keep_editing")}</DialogButton>
+                          <DialogButton style={{ flex: 1 }} onClick={closeEditor}>{t("editor.discard")}</DialogButton>
+                        </Focusable>
+                      </div>
+                    ) : null}
+
+                    <Focusable style={{ minWidth: 0 }}>
+                      <textarea
+                        ref={editorAreaRef}
+                        data-file-editor
+                        value={editorContent}
+                        readOnly={editorReadOnly || editorLoading}
+                        spellCheck={false}
+                        autoCapitalize="off"
+                        autoCorrect="off"
+                        placeholder={editorLoading ? t("editor.loading") : t("editor.placeholder")}
+                        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setEditorContent(e.currentTarget.value)}
+                        style={{
+                          width: "100%",
+                          height: "44vh",
+                          minHeight: 220,
+                          boxSizing: "border-box",
+                          resize: "none",
+                          padding: "10px 12px",
+                          borderRadius: 4,
+                          border: "1px solid rgba(255,255,255,0.14)",
+                          background: "rgba(0,0,0,0.35)",
+                          color: "#e6e6e6",
+                          fontFamily: "Consolas, 'Courier New', monospace",
+                          fontSize: 14,
+                          lineHeight: 1.45,
+                          whiteSpace: editorWrap ? "pre-wrap" : "pre",
+                          overflowWrap: editorWrap ? "break-word" : "normal",
+                          overflowX: editorWrap ? "hidden" : "auto",
+                          outline: "none",
+                        }}
+                      />
+                    </Focusable>
+
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, fontSize: 11, opacity: 0.5, padding: "6px 2px 10px", minWidth: 0 }}>
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", direction: "rtl", textAlign: "left", minWidth: 0 }}>
+                        {editorPath ?? ""}
+                      </span>
+                      <span style={{ flexShrink: 0 }}>
+                        {t("editor.lines").replace("{count}", String(countLines(editorContent)))}
+                      </span>
+                    </div>
+
+                    <div style={{ display: "flex", flexDirection: "column", gap: 12, width: "100%" }}>
+                      <Focusable navEntryPreferPosition={NavEntryPositionPreferences.MAINTAIN_X}>
+                        <div style={{ width: "100%" }}>
+                          <ToggleField
+                            label={t("editor.wrap")}
+                            checked={editorWrap}
+                            onChange={(v: boolean) => setEditorWrap(v)}
+                          />
+                        </div>
+                      </Focusable>
+                      <Focusable navEntryPreferPosition={NavEntryPositionPreferences.MAINTAIN_X}>
+                        <div style={{ width: "100%" }}>
+                          <DialogButton
+                            disabled={editorReadOnly || editorLoading || editorSaving || !editorDirty}
+                            onClick={() => void handleSaveFile(false)}
+                          >
+                            {editorSaving ? t("editor.saving") : t("action.save")}
+                          </DialogButton>
+                        </div>
+                      </Focusable>
+                      <Focusable navEntryPreferPosition={NavEntryPositionPreferences.MAINTAIN_X}>
+                        <div style={{ width: "100%" }}>
+                          <DialogButton onClick={requestCloseEditor}>{t("action.close")}</DialogButton>
                         </div>
                       </Focusable>
                     </div>
