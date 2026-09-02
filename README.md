@@ -71,11 +71,13 @@ Only drives worth navigating to are listed — SD cards, USB storage, external a
 | Button | Action |
 | --- | --- |
 | **A** | Open folder, or open a text file in the editor |
-| **B** | Go up one directory (hold to exit the plugin) |
+| **B** | Tap to go up one directory; **hold** for a moment to leave the plugin from any depth (a progress bar shows the hold) |
 | **X** | Toggle split view |
 | **Y** | Options menu |
 | **L1** / **R1** | Switch to the left / right panel |
 | **D-pad** | Navigate, and move between panels |
+
+The **Y** options menu also has an **Exit file manager** entry, if you would rather not hold a button.
 
 ## Installation
 
