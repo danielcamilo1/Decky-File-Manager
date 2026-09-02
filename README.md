@@ -57,6 +57,7 @@ Text files open in an editor right inside the plugin, so a config tweak no longe
 
 * Press **A** on a text file to open it, or pick **Edit file** from the **Y** options menu for any file.
 * The file is shown as a list of numbered lines. Press **A** on a line to edit it — the Steam on-screen keyboard opens on the text field — then **Apply**. The same panel can **insert a line below** or **delete** the line.
+* Everything is reachable with the D-pad; **B** backs out of the line you are typing before it backs out of the file.
 * **Save** writes the file back in place, keeping its permissions.
 * UTF-8, UTF-16 and Latin-1 files are all read correctly, and saved back in the encoding — and with the byte-order mark — they came with.
 * Files that are not text, or larger than 1 MB, are refused rather than mangled.
