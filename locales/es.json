@@ -125,11 +125,13 @@
   "recent.clear": "Borrar historial",
   "editor.error_binary": "Este archivo no es texto y no se puede editar.",
   "editor.error_too_large": "Este archivo es demasiado grande para editar (límite de 1 MB).",
-  "editor.hint": "Pulsa A en una línea para editarla con el teclado en pantalla.",
+  "editor.hint": "Pulsa A en una línea para editarla. Las teclas de abajo escriben sin necesidad del teclado de Steam.",
   "editor.edit_line": "Línea {number}",
   "editor.apply": "Aplicar",
   "editor.line_empty": "(línea vacía)",
   "editor.insert_line": "Insertar línea",
   "editor.delete_line": "Eliminar línea",
-  "recent.failed": "No se pudo cargar el historial de carpetas."
+  "recent.failed": "No se pudo cargar el historial de carpetas.",
+  "editor.space": "Espacio",
+  "editor.clear_line": "Borrar"
 }
