@@ -17,7 +17,7 @@ import {
   DialogButton,
 } from "@decky/ui";
 import { callable, definePlugin, routerHook } from "@decky/api";
-import { showContextMenu, Menu, MenuItem, MenuSeparator } from "@decky/ui";
+import { showContextMenu, showModal, Menu, MenuItem, MenuSeparator } from "@decky/ui";
 
 const FOCUSABLE_SELECTOR = "button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1']):not([disabled])";
 
@@ -486,6 +486,36 @@ const listDir = callable<[string], { path: string; items: FileEntry[] }>("list_d
 const listDrives = callable<[], { drives: DriveEntry[] }>("list_drives");
 const getRecentPaths = callable<[], { paths: RecentEntry[] }>("get_recent_paths");
 const clearRecentPaths = callable<[], { success: boolean }>("clear_recent_paths");
+const readTextFile = callable<[string], {
+  path: string;
+  name: string;
+  content: string;
+  encoding: string;
+  size: number;
+  modified: number;
+  read_only: boolean;
+}>("read_text_file");
+const writeTextFile = callable<[string, string, number, string, boolean], {
+  success: boolean;
+  stale?: boolean;
+  path: string;
+  size?: number;
+  modified: number;
+  encoding?: string;
+}>("write_text_file");
+
+/**
+ * Backend exception text is Portuguese by convention; match on it so the
+ * reason a file was refused reads in the user's own language.
+ */
+function backendErrorMessage(e: any, fallbackKey: string): string {
+  const message = String(e?.message ?? t(fallbackKey));
+  const lower = message.toLowerCase();
+  if (lower.includes("permissão")) return t("permission.denied");
+  if (lower.includes("binário")) return t("editor.error_binary");
+  if (lower.includes("grande demais")) return t("editor.error_too_large");
+  return message;
+}
 
 type PaneIndex = 0 | 1;
 
@@ -840,6 +870,402 @@ function PaneView({
   );
 }
 
+/**
+ * The file editor, mounted through showModal.
+ *
+ * It has to go through Steam's modal manager rather than being rendered
+ * inline: only a modal the manager knows about joins the gamepad navigation
+ * tree, and only then does Steam activate the text field and raise the
+ * on-screen keyboard. An inline <ModalRoot> draws the same chrome but is
+ * reachable by touch alone.
+ *
+ * Editing is per line because Steam's TextField — its own component, not an
+ * <input> wrapper — is the thing that brings up the keyboard, and it is
+ * single-line.
+ */
+function FileEditorModal({
+  path,
+  name,
+  onSaved,
+  onClosed,
+  closeModal,
+}: {
+  path: string;
+  name: string;
+  onSaved?: () => void;
+  onClosed?: () => void;
+  closeModal?: () => void;
+}) {
+  const [content, setContent] = useState("");
+  const [original, setOriginal] = useState("");
+  const [encoding, setEncoding] = useState("utf-8");
+  const [modified, setModified] = useState(0);
+  const [readOnly, setReadOnly] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [stale, setStale] = useState(false);
+  const [discardPrompt, setDiscardPrompt] = useState(false);
+  const [editingLine, setEditingLine] = useState<number | null>(null);
+  const [editingValue, setEditingValue] = useState("");
+  const [visibleLines, setVisibleLines] = useState(150);
+
+  const lines = useMemo(() => content.split("\n"), [content]);
+  const dirty = content !== original;
+
+  const onClosedRef = useRef(onClosed);
+  onClosedRef.current = onClosed;
+
+  // React's own teardown is the one signal that always fires, however the
+  // modal was dismissed; leaving the caller's handle dangling would make the
+  // back button think a modal is still open forever.
+  useEffect(() => () => onClosedRef.current?.(), []);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    setStale(false);
+    try {
+      const res = await readTextFile(path);
+      setContent(res.content);
+      setOriginal(res.content);
+      setEncoding(res.encoding);
+      setModified(res.modified);
+      setReadOnly(res.read_only);
+    } catch (e: any) {
+      setError(backendErrorMessage(e, "error.could_not_open_file"));
+    } finally {
+      setLoading(false);
+    }
+  }, [path]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const save = useCallback(async (force: boolean) => {
+    if (saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await writeTextFile(path, content, modified, encoding, force);
+      if (!res.success) {
+        if (res.stale) {
+          setStale(true);
+          return;
+        }
+        throw new Error(t("error.could_not_save_file"));
+      }
+      setOriginal(content);
+      setModified(res.modified);
+      if (res.encoding) setEncoding(res.encoding);
+      setStale(false);
+      setSaved(true);
+      window.setTimeout(() => setSaved(false), 2000);
+      onSaved?.();
+    } catch (e: any) {
+      setError(backendErrorMessage(e, "error.could_not_save_file"));
+    } finally {
+      setSaving(false);
+    }
+  }, [content, encoding, modified, onSaved, path, saving]);
+
+  const startEditLine = useCallback((index: number) => {
+    if (readOnly) return;
+    setEditingLine(index);
+    setEditingValue(lines[index] ?? "");
+  }, [lines, readOnly]);
+
+  const applyLineEdit = useCallback(() => {
+    if (editingLine === null) return;
+    const next = content.split("\n");
+    next[editingLine] = editingValue;
+    setContent(next.join("\n"));
+    setEditingLine(null);
+  }, [content, editingLine, editingValue]);
+
+  /** Add an empty line below and drop straight into typing it. */
+  const insertLineAfter = useCallback((index: number) => {
+    if (readOnly) return;
+    const next = content.split("\n");
+    next.splice(index + 1, 0, "");
+    setContent(next.join("\n"));
+    setEditingLine(index + 1);
+    setEditingValue("");
+    setVisibleLines((count) => Math.max(count, index + 2));
+  }, [content, readOnly]);
+
+  const deleteLine = useCallback((index: number) => {
+    if (readOnly) return;
+    const next = content.split("\n");
+    // A file always has at least one line; emptying the last one is a clear.
+    if (next.length <= 1) {
+      setContent("");
+    } else {
+      next.splice(index, 1);
+      setContent(next.join("\n"));
+    }
+    setEditingLine(null);
+  }, [content, readOnly]);
+
+  // B steps back one layer at a time rather than throwing the file away.
+  const handleBack = useCallback(() => {
+    if (editingLine !== null) {
+      setEditingLine(null);
+      return;
+    }
+    if (discardPrompt) {
+      setDiscardPrompt(false);
+      return;
+    }
+    if (dirty && !loading) {
+      setDiscardPrompt(true);
+      return;
+    }
+    closeModal?.();
+  }, [closeModal, discardPrompt, dirty, editingLine, loading]);
+
+  const status = readOnly
+    ? t("editor.read_only")
+    : loading
+      ? t("editor.loading")
+      : dirty
+        ? t("editor.unsaved")
+        : saved
+          ? t("editor.saved")
+          : encoding;
+
+  return (
+    <ModalRoot closeModal={handleBack} onCancel={handleBack}>
+      <DialogBody>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10, padding: "2px 0 10px", minWidth: 0 }}>
+          <h1 style={{ margin: 0, fontSize: 20, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{name}</h1>
+          <span style={{ fontSize: 12, opacity: 0.55, flexShrink: 0 }}>{status}</span>
+        </div>
+
+        {error ? (
+          <div style={{ margin: "0 0 10px", padding: "6px 10px", borderRadius: 4, fontSize: 12, background: "rgba(220,80,80,0.15)", border: "1px solid rgba(220,80,80,0.4)" }}>
+            {error}
+          </div>
+        ) : null}
+
+        {stale ? (
+          <div style={{ margin: "0 0 10px", padding: "8px 10px", borderRadius: 4, fontSize: 12, background: "rgba(230,170,60,0.15)", border: "1px solid rgba(230,170,60,0.45)" }}>
+            <div style={{ marginBottom: 8 }}>{t("editor.stale_message").replace("{name}", name)}</div>
+            <Focusable style={{ display: "flex", gap: 8 }}>
+              <DialogButton style={{ flex: 1 }} onClick={() => void save(true)}>{t("editor.overwrite")}</DialogButton>
+              <DialogButton style={{ flex: 1 }} onClick={() => void load()}>{t("editor.reload")}</DialogButton>
+            </Focusable>
+          </div>
+        ) : null}
+
+        {discardPrompt ? (
+          <div style={{ margin: "0 0 10px", padding: "8px 10px", borderRadius: 4, fontSize: 12, background: "rgba(220,80,80,0.12)", border: "1px solid rgba(220,80,80,0.4)" }}>
+            <div style={{ marginBottom: 8 }}>{t("editor.discard_message").replace("{name}", name)}</div>
+            <Focusable style={{ display: "flex", gap: 8 }}>
+              <DialogButton style={{ flex: 1 }} onClick={() => setDiscardPrompt(false)}>{t("editor.keep_editing")}</DialogButton>
+              <DialogButton style={{ flex: 1 }} onClick={() => closeModal?.()}>{t("editor.discard")}</DialogButton>
+            </Focusable>
+          </div>
+        ) : null}
+
+        {editingLine !== null ? (
+          <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+            <div style={{ fontSize: 12, opacity: 0.6, padding: "0 2px 6px" }}>
+              {t("editor.edit_line").replace("{number}", String(editingLine + 1))}
+            </div>
+
+            {/* Steam's own text field: this is what raises the keyboard. */}
+            <div style={{ padding: "2px 0 10px" }}>
+              <TextField
+                value={editingValue}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEditingValue(e.currentTarget.value)}
+                bShowCopyAction={false}
+                autoFocus
+              />
+            </div>
+
+            <Focusable style={{ display: "flex", gap: 8 }}>
+              <DialogButton style={{ flex: 1 }} onClick={applyLineEdit}>{t("editor.apply")}</DialogButton>
+              <DialogButton style={{ flex: 1 }} onClick={() => setEditingLine(null)}>{t("action.cancel")}</DialogButton>
+            </Focusable>
+            <Focusable style={{ display: "flex", gap: 8, marginTop: 8 }}>
+              <DialogButton style={{ flex: 1 }} onClick={() => insertLineAfter(editingLine)}>{t("editor.insert_line")}</DialogButton>
+              <DialogButton style={{ flex: 1 }} onClick={() => deleteLine(editingLine)}>{t("editor.delete_line")}</DialogButton>
+            </Focusable>
+          </div>
+        ) : (
+          <>
+            <div style={{ fontSize: 11, opacity: 0.5, padding: "0 2px 6px" }}>{loading ? t("editor.loading") : t("editor.hint")}</div>
+
+            <div style={{ maxHeight: "40vh", overflowY: "auto", minWidth: 0, border: "1px solid rgba(255,255,255,0.12)", borderRadius: 4, background: "rgba(0,0,0,0.35)" }}>
+              <Focusable navEntryPreferPosition={NavEntryPositionPreferences.MAINTAIN_Y}>
+                {lines.slice(0, visibleLines).map((line, index) => (
+                  <Focusable
+                    key={index}
+                    onActivate={() => startEditLine(index)}
+                    onClick={() => startEditLine(index)}
+                    style={{
+                      display: "flex",
+                      gap: 10,
+                      padding: "4px 8px",
+                      minWidth: 0,
+                      fontFamily: "Consolas, 'Courier New', monospace",
+                      fontSize: 13,
+                      lineHeight: 1.5,
+                      cursor: "pointer",
+                    }}
+                  >
+                    <span style={{ opacity: 0.35, minWidth: 34, textAlign: "right", flexShrink: 0, userSelect: "none" }}>{index + 1}</span>
+                    <span
+                      style={{
+                        minWidth: 0,
+                        whiteSpace: "pre-wrap",
+                        overflowWrap: "break-word",
+                        opacity: line.length ? 0.95 : 0.35,
+                        fontStyle: line.length ? "normal" : "italic",
+                      }}
+                    >
+                      {line.length ? line : t("editor.line_empty")}
+                    </span>
+                  </Focusable>
+                ))}
+
+                {lines.length > visibleLines ? (
+                  <div style={{ padding: 8 }}>
+                    <DialogButton onClick={() => setVisibleLines((count) => count + 150)}>
+                      {t("action.show_more").replace("{count}", String(lines.length - visibleLines))}
+                    </DialogButton>
+                  </div>
+                ) : null}
+              </Focusable>
+            </div>
+          </>
+        )}
+
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, fontSize: 11, opacity: 0.5, padding: "6px 2px 10px", minWidth: 0 }}>
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", direction: "rtl", textAlign: "left", minWidth: 0 }}>{path}</span>
+          <span style={{ flexShrink: 0 }}>{t("editor.lines").replace("{count}", String(lines.length))}</span>
+        </div>
+
+        <Focusable style={{ display: "flex", flexDirection: "column", gap: 12, width: "100%" }}>
+          <DialogButton
+            disabled={readOnly || loading || saving || editingLine !== null || !dirty}
+            onClick={() => void save(false)}
+          >
+            {saving ? t("editor.saving") : t("action.save")}
+          </DialogButton>
+          <DialogButton onClick={handleBack}>{t("action.close")}</DialogButton>
+        </Focusable>
+      </DialogBody>
+    </ModalRoot>
+  );
+}
+
+/** Recently visited folders, also through Steam's modal manager. */
+function RecentFoldersModal({
+  onSelect,
+  onClosed,
+  closeModal,
+}: {
+  onSelect: (entry: RecentEntry) => void;
+  onClosed?: () => void;
+  closeModal?: () => void;
+}) {
+  const onClosedRef = useRef(onClosed);
+  onClosedRef.current = onClosed;
+  useEffect(() => () => onClosedRef.current?.(), []);
+
+  const [paths, setPaths] = useState<RecentEntry[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await getRecentPaths();
+      setPaths(res.paths ?? []);
+      setError(null);
+    } catch (e: any) {
+      // An empty list and a failed call look identical on screen otherwise.
+      console.warn("recent: could not load history", e);
+      setPaths([]);
+      setError(String(e?.message ?? e));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  return (
+    <ModalRoot closeModal={closeModal} onCancel={closeModal}>
+      <DialogBody>
+        <div style={{ textAlign: "center", padding: "6px 0 12px" }}>
+          <h1 style={{ margin: 0 }}>{t("modal.recent")}</h1>
+        </div>
+
+        {error ? (
+          <div style={{ margin: "0 0 10px", padding: "6px 10px", borderRadius: 4, fontSize: 12, background: "rgba(220,80,80,0.15)", border: "1px solid rgba(220,80,80,0.4)" }}>
+            <div>{t("recent.failed")}</div>
+            <div style={{ opacity: 0.7, marginTop: 4 }}>{error}</div>
+          </div>
+        ) : null}
+
+        {loading ? (
+          <div style={{ padding: "12px 0", textAlign: "center", opacity: 0.6 }}>{t("action.loading")}</div>
+        ) : paths.length === 0 ? (
+          <div style={{ padding: "12px 0", textAlign: "center", opacity: 0.6 }}>{t("recent.empty")}</div>
+        ) : (
+          <Focusable
+            navEntryPreferPosition={NavEntryPositionPreferences.MAINTAIN_Y}
+            style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: "46vh", overflowY: "auto", minWidth: 0 }}
+          >
+            {paths.map((entry) => (
+              <DialogButton
+                key={entry.path}
+                onClick={() => {
+                  onSelect(entry);
+                  closeModal?.();
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, textAlign: "left" }}>
+                  <FolderIcon />
+                  <div style={{ display: "flex", flexDirection: "column", minWidth: 0, alignItems: "flex-start" }}>
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}>{entry.name}</span>
+                    <span style={{ fontSize: 11, opacity: 0.55, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}>
+                      {shortPath(entry.path, 3)}
+                    </span>
+                  </div>
+                </div>
+              </DialogButton>
+            ))}
+          </Focusable>
+        )}
+
+        <Focusable style={{ display: "flex", flexDirection: "column", gap: 12, width: "100%", marginTop: 16 }}>
+          {paths.length ? (
+            <DialogButton onClick={async () => {
+              try {
+                await clearRecentPaths();
+              } catch (e) {
+                console.warn("recent: could not clear history", e);
+              }
+              await load();
+            }}>
+              {t("recent.clear")}
+            </DialogButton>
+          ) : null}
+          <DialogButton onClick={() => closeModal?.()}>{t("action.close")}</DialogButton>
+        </Focusable>
+      </DialogBody>
+    </ModalRoot>
+  );
+}
+
 const GAMEPAD_BUTTON_B = 1;
 const GAMEPAD_BUTTON_X = 2;
 const GAMEPAD_BUTTON_Y = 3;
@@ -988,7 +1414,7 @@ function FileManagerPage() {
    * actually holds focus counts.
    */
   const isShortcutBlocked = useCallback(() => {
-    if (hasActiveModalRef.current) return true;
+    if (hasActiveModalRef.current || modalInstance.current) return true;
     if (typeof document === "undefined") return false;
 
     const active = document.activeElement as HTMLElement | null;
@@ -1044,6 +1470,10 @@ function FileManagerPage() {
     setExitHoldFilled(false);
   }, []);
 
+  // Modals shown through Steam's manager live outside this tree, so the back
+  // handler tracks the instance the way it already tracks the context menu.
+  const modalInstance = useRef<{ Close: () => void } | null>(null);
+
   const openContextMenuRef = useRef<(item: FileEntry | null) => void>(() => null);
   const getCurrentFocusedItemRef = useRef<() => FileEntry | null>(() => null);
   const goBackRef = useRef<() => void>(() => null);
@@ -1076,23 +1506,7 @@ function FileManagerPage() {
     }
   }, []);
 
-  const refreshRecent = useCallback(async () => {
-    try {
-      const res = await getRecentPaths();
-      setRecentPaths(res.paths ?? []);
-      setRecentError(null);
-    } catch (e: any) {
-      // An empty list and a failed call look identical on screen otherwise,
-      // which makes "the history is broken" impossible to tell from "you
-      // have not been anywhere yet".
-      console.warn("recent: could not load history", e);
-      setRecentPaths([]);
-      setRecentError(String(e?.message ?? e));
-    }
-  }, []);
-
   const goToRecent = useCallback((entry: RecentEntry) => {
-    setRecentRequested(false);
     const pane = panesRef.current[activePaneIndexRef.current];
     pane.setError(null);
     void pane.loadPath(entry.path, t("error.directory_not_found"));
@@ -1168,23 +1582,6 @@ function FileManagerPage() {
     permissions: string;
   }>("get_properties");
   const getDirectorySize = callable<[string], { size: number | null; path: string }>("get_directory_size");
-  const readTextFile = callable<[string], {
-    path: string;
-    name: string;
-    content: string;
-    encoding: string;
-    size: number;
-    modified: number;
-    read_only: boolean;
-  }>("read_text_file");
-  const writeTextFile = callable<[string, string, number, string, boolean], {
-    success: boolean;
-    stale?: boolean;
-    path: string;
-    size?: number;
-    modified: number;
-    encoding?: string;
-  }>("write_text_file");
   const createFileCallable = callable<[string, string], { success: boolean; path?: string; new_path?: string }>("create_file");
 
   const [clipboardHas, setClipboardHas] = useState(false);
@@ -1238,36 +1635,6 @@ function FileManagerPage() {
   const conflictPrimaryRef = useRef<HTMLButtonElement | null>(null);
   const permissionPrimaryRef = useRef<HTMLButtonElement | null>(null);
 
-  const [recentRequested, setRecentRequested] = useState(false);
-  const [recentPaths, setRecentPaths] = useState<RecentEntry[]>([]);
-  const [recentError, setRecentError] = useState<string | null>(null);
-  const recentPrimaryRef = useRef<HTMLButtonElement | null>(null);
-
-  const [editorRequested, setEditorRequested] = useState(false);
-  const [editorPath, setEditorPath] = useState<string | null>(null);
-  const [editorName, setEditorName] = useState<string>("");
-  const [editorContent, setEditorContent] = useState<string>("");
-  const [editorOriginal, setEditorOriginal] = useState<string>("");
-  const [editorEncoding, setEditorEncoding] = useState<string>("utf-8");
-  const [editorModified, setEditorModified] = useState<number>(0);
-  const [editorReadOnly, setEditorReadOnly] = useState(false);
-  const [editorLoading, setEditorLoading] = useState(false);
-  const [editorSaving, setEditorSaving] = useState(false);
-  const [editorSaved, setEditorSaved] = useState(false);
-  const [editorError, setEditorError] = useState<string | null>(null);
-  const [editorStale, setEditorStale] = useState(false);
-  const [editorDiscardPrompt, setEditorDiscardPrompt] = useState(false);
-  // Text entry goes through Steam's own TextField, one line at a time: it is
-  // the component that brings up the on-screen keyboard (a raw <textarea>
-  // never does), so a line list is the only editing model that can be typed
-  // into with a controller.
-  const [editingLine, setEditingLine] = useState<number | null>(null);
-  const [editingLineValue, setEditingLineValue] = useState("");
-  const [visibleLineCount, setVisibleLineCount] = useState(150);
-  const lineFieldRef = useRef<HTMLDivElement | null>(null);
-  const editorLines = useMemo(() => editorContent.split("\n"), [editorContent]);
-  const editorDirty = editorContent !== editorOriginal;
-
   const [createFolderRequested, setCreateFolderRequested] = useState(false);
   const [createFolderName, setCreateFolderName] = useState("");
   const createFolderRef = useRef<HTMLDivElement | null>(null);
@@ -1277,7 +1644,7 @@ function FileManagerPage() {
   const createFileRef = useRef<HTMLDivElement | null>(null);
   const createFileConfirmRef = useRef<HTMLButtonElement | null>(null);
   const fileManagerScopeRef = useRef<HTMLDivElement | null>(null);
-  const hasActiveModal = renameRequested || deleteRequested || propertiesRequested || createFolderRequested || createFileRequested || editorRequested || recentRequested || !!conflictModal || !!operationModal || !!permissionModal;
+  const hasActiveModal = renameRequested || deleteRequested || propertiesRequested || createFolderRequested || createFileRequested || !!conflictModal || !!operationModal || !!permissionModal;
   hasActiveModalRef.current = hasActiveModal;
 
   // Steam dismisses a modal on the B *press*, through the Focusable's own
@@ -1407,7 +1774,7 @@ function FileManagerPage() {
   }, [hasClipboard, activePane.path]);
 
   const isAnyModalOrMenuOpen = useCallback(() => {
-    if (contextMenuInstance.current) {
+    if (contextMenuInstance.current || modalInstance.current) {
       return true;
     }
 
@@ -1432,8 +1799,8 @@ function FileManagerPage() {
       }
     }
 
-    return propertiesRequested || renameRequested || deleteRequested || createFolderRequested || createFileRequested || editorRequested || recentRequested || !!conflictModal || !!operationModal || !!permissionModal;
-  }, [propertiesRequested, renameRequested, deleteRequested, createFolderRequested, createFileRequested, editorRequested, recentRequested, conflictModal, operationModal, permissionModal]);
+    return propertiesRequested || renameRequested || deleteRequested || createFolderRequested || createFileRequested || !!conflictModal || !!operationModal || !!permissionModal;
+  }, [propertiesRequested, renameRequested, deleteRequested, createFolderRequested, createFileRequested, conflictModal, operationModal, permissionModal]);
 
   useEffect(() => {
     const input = (window as any).SteamClient?.Input;
@@ -1447,7 +1814,7 @@ function FileManagerPage() {
           if (gamepadButton === GAMEPAD_BUTTON_Y && isPressed) {
             // The options menu belongs to the file list; opening it over a
             // modal buries the modal under a menu about the file behind it.
-            if (hasActiveModalRef.current) return;
+            if (hasActiveModalRef.current || modalInstance.current) return;
             const item = getCurrentFocusedItemRef.current();
             openContextMenuRef.current(item);
             return;
@@ -1660,37 +2027,6 @@ function FileManagerPage() {
     }
   }, [createFileRequested]);
 
-  // Same focus dance as the rename modal, which is what makes the on-screen
-  // keyboard appear: put focus in the Steam text field once it is mounted.
-  useEffect(() => {
-    if (editingLine === null) return;
-    const timeout = window.setTimeout(() => {
-      const input = lineFieldRef.current?.querySelector<HTMLInputElement>("input");
-      try {
-        input?.focus();
-        input?.select();
-      } catch {
-      }
-    }, 50);
-    return () => window.clearTimeout(timeout);
-  }, [editingLine]);
-
-  // A freshly opened file starts at the top of the list again.
-  useEffect(() => {
-    if (!editorRequested) return;
-    setVisibleLineCount(150);
-    setEditingLine(null);
-  }, [editorRequested, editorPath]);
-
-  useEffect(() => {
-    if (!recentRequested) return;
-    void refreshRecent();
-    const timeout = window.setTimeout(() => {
-      try { recentPrimaryRef.current?.focus(); } catch {}
-    }, 50);
-    return () => window.clearTimeout(timeout);
-  }, [recentRequested, refreshRecent]);
-
   useEffect(() => {
     if (!conflictModal) return;
     const timeout = window.setTimeout(() => {
@@ -1893,174 +2229,39 @@ function FileManagerPage() {
    * problem is shown in the modal itself rather than stacking a second
    * ModalRoot on top of the one the user is looking at.
    */
-  const editorErrorMessage = useCallback((e: any, fallbackKey: string) => {
-    const message = String(e?.message ?? t(fallbackKey));
-    const lower = message.toLowerCase();
-    // Backend exception text is Portuguese by convention; match on it so the
-    // reason a file was refused reads in the user's own language.
-    if (lower.includes("permissão")) return t("permission.denied");
-    if (lower.includes("binário")) return t("editor.error_binary");
-    if (lower.includes("grande demais")) return t("editor.error_too_large");
-    return message;
-  }, []);
-
+  // Both of these go through Steam's modal manager rather than being rendered
+  // inline, which is what puts them in the gamepad navigation tree.
   const openEditor = useCallback((item: FileEntry) => {
-    setEditorRequested(true);
-    setEditorPath(item.path);
-    setEditorName(item.name);
-    setEditorContent("");
-    setEditorOriginal("");
-    setEditorEncoding("utf-8");
-    setEditorModified(0);
-    setEditorReadOnly(false);
-    setEditorError(null);
-    setEditorStale(false);
-    setEditorSaved(false);
-    setEditorDiscardPrompt(false);
-    setEditorLoading(true);
-
-    void (async () => {
-      try {
-        const res = await readTextFile(item.path);
-        setEditorContent(res.content);
-        setEditorOriginal(res.content);
-        setEditorEncoding(res.encoding);
-        setEditorModified(res.modified);
-        setEditorReadOnly(res.read_only);
-      } catch (e: any) {
-        setEditorError(editorErrorMessage(e, "error.could_not_open_file"));
-      } finally {
-        setEditorLoading(false);
-      }
-    })();
-  }, [readTextFile, editorErrorMessage]);
-
-  const closeEditor = useCallback(() => {
-    setEditorRequested(false);
-    setEditorPath(null);
-    setEditorName("");
-    setEditorContent("");
-    setEditorOriginal("");
-    setEditorError(null);
-    setEditorStale(false);
-    setEditorSaved(false);
-    setEditorDiscardPrompt(false);
-    setEditorLoading(false);
-  }, []);
-
-  /** B / Close: never throw away edits without asking first. */
-  const requestCloseEditor = useCallback(() => {
-    // B backs out of the line being typed first, not the whole file.
-    if (editingLine !== null) {
-      setEditingLine(null);
-      return;
+    if (modalInstance.current) {
+      modalInstance.current.Close();
+      modalInstance.current = null;
     }
-    if (editorDiscardPrompt) {
-      setEditorDiscardPrompt(false);
-      return;
+    modalInstance.current = showModal(
+      <FileEditorModal
+        path={item.path}
+        name={item.name}
+        onSaved={() => {
+          void refreshPanes();
+          void refreshDrives();
+        }}
+        onClosed={() => { modalInstance.current = null; }}
+      />,
+      window,
+      { strTitle: item.name, bHideMainWindowForPopouts: false },
+    );
+  }, [refreshDrives, refreshPanes]);
+
+  const openRecentModal = useCallback(() => {
+    if (modalInstance.current) {
+      modalInstance.current.Close();
+      modalInstance.current = null;
     }
-    if (editorDirty && !editorLoading) {
-      setEditorDiscardPrompt(true);
-      return;
-    }
-    closeEditor();
-  }, [closeEditor, editingLine, editorDirty, editorDiscardPrompt, editorLoading]);
-
-  const handleSaveFile = useCallback(async (force = false) => {
-    if (!editorPath || editorSaving) return;
-
-    setEditorSaving(true);
-    setEditorError(null);
-
-    try {
-      const res = await writeTextFile(editorPath, editorContent, editorModified, editorEncoding, force);
-
-      // The file moved under us since it was opened: let the user decide
-      // between clobbering the other change and reloading it.
-      if (!res.success) {
-        if (res.stale) {
-          setEditorStale(true);
-          return false;
-        }
-        throw new Error(t("error.could_not_save_file"));
-      }
-
-      setEditorOriginal(editorContent);
-      setEditorModified(res.modified);
-      if (res.encoding) setEditorEncoding(res.encoding);
-      setEditorStale(false);
-      setEditorSaved(true);
-      window.setTimeout(() => setEditorSaved(false), 2000);
-      void refreshPanes();
-      return true;
-    } catch (e: any) {
-      setEditorError(editorErrorMessage(e, "error.could_not_save_file"));
-      return false;
-    } finally {
-      setEditorSaving(false);
-    }
-  }, [editorContent, editorEncoding, editorModified, editorPath, editorSaving, editorErrorMessage, refreshPanes, writeTextFile]);
-
-  const replaceLines = useCallback((next: string[]) => {
-    setEditorContent(next.join("\n"));
-  }, []);
-
-  const startEditLine = useCallback((index: number) => {
-    if (editorReadOnly) return;
-    setEditingLine(index);
-    setEditingLineValue(editorLines[index] ?? "");
-  }, [editorLines, editorReadOnly]);
-
-  const applyLineEdit = useCallback(() => {
-    if (editingLine === null) return;
-    const next = editorContent.split("\n");
-    next[editingLine] = editingLineValue;
-    replaceLines(next);
-    setEditingLine(null);
-  }, [editingLine, editingLineValue, editorContent, replaceLines]);
-
-  /** Add an empty line below and drop straight into typing it. */
-  const insertLineAfter = useCallback((index: number) => {
-    if (editorReadOnly) return;
-    const next = editorContent.split("\n");
-    next.splice(index + 1, 0, "");
-    replaceLines(next);
-    setEditingLine(index + 1);
-    setEditingLineValue("");
-    setVisibleLineCount((count) => Math.max(count, index + 2));
-  }, [editorContent, editorReadOnly, replaceLines]);
-
-  const deleteLine = useCallback((index: number) => {
-    if (editorReadOnly) return;
-    const next = editorContent.split("\n");
-    // A file always has at least one line; emptying the last one is a clear.
-    if (next.length <= 1) {
-      replaceLines([""]);
-      return;
-    }
-    next.splice(index, 1);
-    replaceLines(next);
-  }, [editorContent, editorReadOnly, replaceLines]);
-
-  /** Throw away the buffer and take whatever is on disk now. */
-  const reloadEditor = useCallback(async () => {
-    if (!editorPath) return;
-    setEditorLoading(true);
-    setEditorError(null);
-    setEditorStale(false);
-    try {
-      const res = await readTextFile(editorPath);
-      setEditorContent(res.content);
-      setEditorOriginal(res.content);
-      setEditorEncoding(res.encoding);
-      setEditorModified(res.modified);
-      setEditorReadOnly(res.read_only);
-    } catch (e: any) {
-      setEditorError(editorErrorMessage(e, "error.could_not_open_file"));
-    } finally {
-      setEditorLoading(false);
-    }
-  }, [editorPath, readTextFile, editorErrorMessage]);
+    modalInstance.current = showModal(
+      <RecentFoldersModal onSelect={goToRecent} onClosed={() => { modalInstance.current = null; }} />,
+      window,
+      { strTitle: t("modal.recent"), bHideMainWindowForPopouts: false },
+    );
+  }, [goToRecent]);
 
   const handleConflictChoice = useCallback(async (strategy: string, applyToAll = false) => {
     if (!conflictModal) return;
@@ -2120,7 +2321,7 @@ function FileManagerPage() {
           contextMenuInstance.current.Hide();
           contextMenuInstance.current = null;
         }
-        window.setTimeout(() => setRecentRequested(true), 0);
+        window.setTimeout(() => openRecentModal(), 0);
       };
       const exitApp = () => {
         // Same teardown caveat as toggleSplit: close the menu first, navigate
@@ -2419,11 +2620,6 @@ function FileManagerPage() {
     setError(null);
   }, [activePane.path, setError]);
 
-  // The backend records a folder when it lists it, so re-read the history
-  // after each navigation rather than tracking it twice.
-  useEffect(() => {
-    void refreshRecent();
-  }, [activePane.path, refreshRecent]);
 
   const visiblePanes: PaneApi[] = dualPane ? [paneA, paneB] : [activePane];
 
@@ -2723,98 +2919,6 @@ function FileManagerPage() {
             </ModalRoot>
           )}
 
-          {recentRequested && (
-            <ModalRoot
-              show={true}
-              bHideMainWindowForPopouts={true}
-              onCancel={() => setRecentRequested(false)}
-            >
-              <DialogBody>
-                <ModalFocusScope>
-                  <Focusable
-                    navEntryPreferPosition={NavEntryPositionPreferences.MAINTAIN_X}
-                    onCancel={() => setRecentRequested(false)}
-                    onCancelButton={() => setRecentRequested(false)}
-                    style={{ outline: "none", display: "flex", flexDirection: "column", alignItems: "stretch", minWidth: 0 }}
-                  >
-                    <div style={{ textAlign: "center", padding: "6px 0 12px" }}>
-                      <h1 style={{ margin: 0 }}>{t("modal.recent")}</h1>
-                    </div>
-
-                    {recentError ? (
-                      <div
-                        style={{
-                          margin: "0 0 10px",
-                          padding: "6px 10px",
-                          borderRadius: 4,
-                          fontSize: 12,
-                          background: "rgba(220,80,80,0.15)",
-                          border: "1px solid rgba(220,80,80,0.4)",
-                        }}
-                      >
-                        <div>{t("recent.failed")}</div>
-                        <div style={{ opacity: 0.7, marginTop: 4 }}>{recentError}</div>
-                      </div>
-                    ) : null}
-
-                    {recentPaths.length === 0 ? (
-                      <div style={{ padding: "12px 0", textAlign: "center", opacity: 0.6 }}>{t("recent.empty")}</div>
-                    ) : (
-                      <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: "46vh", overflowY: "auto", minWidth: 0 }}>
-                        {recentPaths.map((entry, index) => (
-                          <Focusable key={entry.path} navEntryPreferPosition={NavEntryPositionPreferences.MAINTAIN_X}>
-                            <div style={{ width: "100%", minWidth: 0 }}>
-                              <DialogButton
-                                ref={(index === 0 ? recentPrimaryRef : undefined) as any}
-                                onClick={() => goToRecent(entry)}
-                              >
-                                <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, textAlign: "left" }}>
-                                  <FolderIcon />
-                                  <div style={{ display: "flex", flexDirection: "column", minWidth: 0, alignItems: "flex-start" }}>
-                                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}>
-                                      {entry.name}
-                                    </span>
-                                    <span style={{ fontSize: 11, opacity: 0.55, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}>
-                                      {shortPath(entry.path, 3)}
-                                    </span>
-                                  </div>
-                                </div>
-                              </DialogButton>
-                            </div>
-                          </Focusable>
-                        ))}
-                      </div>
-                    )}
-
-                    <div style={{ display: "flex", flexDirection: "column", gap: 12, width: "100%", marginTop: 16 }}>
-                      {recentPaths.length ? (
-                        <Focusable navEntryPreferPosition={NavEntryPositionPreferences.MAINTAIN_X}>
-                          <div style={{ width: "100%" }}>
-                            <DialogButton onClick={async () => {
-                              try {
-                                await clearRecentPaths();
-                              } catch (e) {
-                                console.warn("recent: could not clear history", e);
-                              }
-                              await refreshRecent();
-                            }}>
-                              {t("recent.clear")}
-                            </DialogButton>
-                          </div>
-                        </Focusable>
-                      ) : null}
-                      <Focusable navEntryPreferPosition={NavEntryPositionPreferences.MAINTAIN_X}>
-                        <div style={{ width: "100%" }}>
-                          <DialogButton onClick={() => setRecentRequested(false)}>{t("action.close")}</DialogButton>
-                        </div>
-                      </Focusable>
-                    </div>
-                  </Focusable>
-                </ModalFocusScope>
-              </DialogBody>
-            </ModalRoot>
-          )}
-
           {createFileRequested && (
             <ModalRoot
               show={true}
@@ -2858,191 +2962,6 @@ function FileManagerPage() {
                           <DialogButton onClick={() => { setCreateFileRequested(false); setCreateFileName(""); }}>
                             {t("action.cancel")}
                           </DialogButton>
-                        </div>
-                      </Focusable>
-                    </div>
-                  </Focusable>
-                </ModalFocusScope>
-              </DialogBody>
-            </ModalRoot>
-          )}
-
-          {editorRequested && (
-            <ModalRoot
-              show={true}
-              bDisableBackgroundDismiss={true}
-              bHideMainWindowForPopouts={true}
-              onCancel={requestCloseEditor}
-            >
-              <DialogBody>
-                <ModalFocusScope>
-                  <Focusable
-                    navEntryPreferPosition={NavEntryPositionPreferences.MAINTAIN_X}
-                    onCancel={requestCloseEditor}
-                    onCancelButton={requestCloseEditor}
-                    style={{ outline: "none", display: "flex", flexDirection: "column", alignItems: "stretch", minWidth: 0 }}
-                  >
-                    <div style={{ display: "flex", alignItems: "baseline", gap: 10, padding: "2px 0 10px", minWidth: 0 }}>
-                      <h1 style={{ margin: 0, fontSize: 20, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
-                        {editorName}
-                      </h1>
-                      <span style={{ fontSize: 12, opacity: 0.55, flexShrink: 0 }}>
-                        {editorReadOnly ? t("editor.read_only") : editorDirty ? t("editor.unsaved") : editorSaved ? t("editor.saved") : editorEncoding}
-                      </span>
-                    </div>
-
-                    {editorError ? (
-                      <div
-                        style={{
-                          margin: "0 0 10px",
-                          padding: "6px 10px",
-                          borderRadius: 4,
-                          fontSize: 12,
-                          background: "rgba(220,80,80,0.15)",
-                          border: "1px solid rgba(220,80,80,0.4)",
-                        }}
-                      >
-                        {editorError}
-                      </div>
-                    ) : null}
-
-                    {editorStale ? (
-                      <div
-                        style={{
-                          margin: "0 0 10px",
-                          padding: "8px 10px",
-                          borderRadius: 4,
-                          fontSize: 12,
-                          background: "rgba(230,170,60,0.15)",
-                          border: "1px solid rgba(230,170,60,0.45)",
-                        }}
-                      >
-                        <div style={{ marginBottom: 8 }}>{t("editor.stale_message").replace("{name}", editorName)}</div>
-                        <Focusable style={{ display: "flex", gap: 8 }}>
-                          <DialogButton style={{ flex: 1 }} onClick={() => void handleSaveFile(true)}>{t("editor.overwrite")}</DialogButton>
-                          <DialogButton style={{ flex: 1 }} onClick={() => void reloadEditor()}>{t("editor.reload")}</DialogButton>
-                        </Focusable>
-                      </div>
-                    ) : null}
-
-                    {editorDiscardPrompt ? (
-                      <div
-                        style={{
-                          margin: "0 0 10px",
-                          padding: "8px 10px",
-                          borderRadius: 4,
-                          fontSize: 12,
-                          background: "rgba(220,80,80,0.12)",
-                          border: "1px solid rgba(220,80,80,0.4)",
-                        }}
-                      >
-                        <div style={{ marginBottom: 8 }}>{t("editor.discard_message").replace("{name}", editorName)}</div>
-                        <Focusable style={{ display: "flex", gap: 8 }}>
-                          <DialogButton style={{ flex: 1 }} onClick={() => setEditorDiscardPrompt(false)}>{t("editor.keep_editing")}</DialogButton>
-                          <DialogButton style={{ flex: 1 }} onClick={closeEditor}>{t("editor.discard")}</DialogButton>
-                        </Focusable>
-                      </div>
-                    ) : null}
-
-                    {editingLine !== null ? (
-                      <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-                        <div style={{ fontSize: 12, opacity: 0.6, padding: "0 2px 6px" }}>
-                          {t("editor.edit_line").replace("{number}", String(editingLine + 1))}
-                        </div>
-
-                        {/* Steam's own text field — this is what raises the
-                            on-screen keyboard. */}
-                        <div ref={lineFieldRef} style={{ padding: "2px 0 10px" }}>
-                          <TextField
-                            value={editingLineValue}
-                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEditingLineValue(e.currentTarget.value)}
-                            bShowCopyAction={false}
-                            autoFocus
-                          />
-                        </div>
-
-                        <Focusable style={{ display: "flex", gap: 8 }}>
-                          <DialogButton style={{ flex: 1 }} onClick={applyLineEdit}>{t("editor.apply")}</DialogButton>
-                          <DialogButton style={{ flex: 1 }} onClick={() => setEditingLine(null)}>{t("action.cancel")}</DialogButton>
-                        </Focusable>
-
-                        <Focusable style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                          <DialogButton style={{ flex: 1 }} onClick={() => insertLineAfter(editingLine)}>{t("editor.insert_line")}</DialogButton>
-                          <DialogButton style={{ flex: 1 }} onClick={() => { deleteLine(editingLine); setEditingLine(null); }}>{t("editor.delete_line")}</DialogButton>
-                        </Focusable>
-                      </div>
-                    ) : (
-                      <>
-                        <div style={{ fontSize: 11, opacity: 0.5, padding: "0 2px 6px" }}>{t("editor.hint")}</div>
-
-                        <div style={{ maxHeight: "40vh", overflowY: "auto", minWidth: 0, border: "1px solid rgba(255,255,255,0.12)", borderRadius: 4, background: "rgba(0,0,0,0.35)" }}>
-                          <Focusable navEntryPreferPosition={NavEntryPositionPreferences.MAINTAIN_Y}>
-                            {editorLines.slice(0, visibleLineCount).map((line, index) => (
-                              <Focusable
-                                key={index}
-                                onActivate={() => startEditLine(index)}
-                                style={{
-                                  display: "flex",
-                                  gap: 10,
-                                  padding: "4px 8px",
-                                  minWidth: 0,
-                                  fontFamily: "Consolas, 'Courier New', monospace",
-                                  fontSize: 13,
-                                  lineHeight: 1.5,
-                                  cursor: "pointer",
-                                }}
-                                onClick={() => startEditLine(index)}
-                              >
-                                <span style={{ opacity: 0.35, minWidth: 34, textAlign: "right", flexShrink: 0, userSelect: "none" }}>{index + 1}</span>
-                                <span
-                                  style={{
-                                    minWidth: 0,
-                                    whiteSpace: "pre-wrap",
-                                    overflowWrap: "break-word",
-                                    opacity: line.length ? 0.95 : 0.35,
-                                    fontStyle: line.length ? "normal" : "italic",
-                                  }}
-                                >
-                                  {line.length ? line : t("editor.line_empty")}
-                                </span>
-                              </Focusable>
-                            ))}
-
-                            {editorLines.length > visibleLineCount ? (
-                              <div style={{ padding: 8 }}>
-                                <DialogButton onClick={() => setVisibleLineCount((count) => count + 150)}>
-                                  {t("action.show_more").replace("{count}", String(editorLines.length - visibleLineCount))}
-                                </DialogButton>
-                              </div>
-                            ) : null}
-                          </Focusable>
-                        </div>
-                      </>
-                    )}
-
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, fontSize: 11, opacity: 0.5, padding: "6px 2px 10px", minWidth: 0 }}>
-                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", direction: "rtl", textAlign: "left", minWidth: 0 }}>
-                        {editorPath ?? ""}
-                      </span>
-                      <span style={{ flexShrink: 0 }}>
-                        {t("editor.lines").replace("{count}", String(editorLines.length))}
-                      </span>
-                    </div>
-
-                    <div style={{ display: "flex", flexDirection: "column", gap: 12, width: "100%" }}>
-                      <Focusable navEntryPreferPosition={NavEntryPositionPreferences.MAINTAIN_X}>
-                        <div style={{ width: "100%" }}>
-                          <DialogButton
-                            disabled={editorReadOnly || editorLoading || editorSaving || editingLine !== null || !editorDirty}
-                            onClick={() => void handleSaveFile(false)}
-                          >
-                            {editorSaving ? t("editor.saving") : t("action.save")}
-                          </DialogButton>
-                        </div>
-                      </Focusable>
-                      <Focusable navEntryPreferPosition={NavEntryPositionPreferences.MAINTAIN_X}>
-                        <div style={{ width: "100%" }}>
-                          <DialogButton onClick={requestCloseEditor}>{t("action.close")}</DialogButton>
                         </div>
                       </Focusable>
                     </div>
