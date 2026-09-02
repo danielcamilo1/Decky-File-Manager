@@ -30,6 +30,7 @@ Manage your files and folders without leaving Gaming Mode. Browse directories, c
 * **Dual-panel (split) view** — browse two folders side by side.
 * **Copy and move directly between panels**, the way desktop file managers work.
 * **Quick access to connected drives** — SD card, USB sticks and external drives.
+* **Built-in text editor** — open, edit and save text files without leaving Gaming Mode.
 * File and folder management.
 * Copy, move, rename, and delete operations.
 * Archive extraction (zip, tar and variants).
@@ -49,6 +50,16 @@ Open a second panel and work between two folders at once, instead of copying som
 
 With the split open, the **Y** options menu gains **Copy to other panel** and **Move to other panel**, which transfer straight to the other side without touching the clipboard.
 
+## Text editor
+
+Text files open in an editor right inside the plugin, so a config tweak no longer means a trip to Desktop Mode.
+
+* Press **A** on a text file to open it, or pick **Edit file** from the **Y** options menu for any file.
+* The on-screen keyboard handles typing; **Save** writes the file back in place, keeping its permissions.
+* Files that are not text, or larger than 1 MB, are refused rather than mangled.
+* Closing with unsaved changes asks before discarding them, and a file changed on disk while you were editing offers **Overwrite** or **Reload**.
+* **New file** in the **Y** options menu creates an empty file to start from.
+
 ## Drives
 
 Connected drives appear as a row of shortcuts above the file list, each showing its free space, with the drive you are currently browsing highlighted. They are also listed in the **Y** options menu when no file is selected.
@@ -59,7 +70,7 @@ Only drives worth navigating to are listed — SD cards, USB storage, external a
 
 | Button | Action |
 | --- | --- |
-| **A** | Open folder |
+| **A** | Open folder, or open a text file in the editor |
 | **B** | Go up one directory (hold to exit the plugin) |
 | **X** | Toggle split view |
 | **Y** | Options menu |

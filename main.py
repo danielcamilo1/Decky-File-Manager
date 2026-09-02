@@ -582,6 +582,164 @@ class Plugin:
 
 
     # ------------------------------------------------------------------
+    # Text editor
+    # ------------------------------------------------------------------
+
+    # The whole file crosses the RPC bridge as a single string, and nothing
+    # larger than this is worth editing with a gamepad anyway.
+    _EDITOR_MAX_BYTES = 1024 * 1024
+
+    @staticmethod
+    def _looks_binary(data: bytes) -> bool:
+        return b"\x00" in data
+
+    def _read_text(self, path: str) -> tuple:
+        with open(path, "rb") as handle:
+            raw = handle.read(self._EDITOR_MAX_BYTES + 1)
+
+        if len(raw) > self._EDITOR_MAX_BYTES:
+            raise ValueError("Arquivo grande demais para editar")
+        if self._looks_binary(raw):
+            raise ValueError("Arquivo binário não pode ser editado")
+
+        try:
+            return raw.decode("utf-8"), "utf-8"
+        except UnicodeDecodeError:
+            # latin-1 decodes any byte string and re-encodes to the exact same
+            # bytes, so a file we could not read as UTF-8 still round-trips as
+            # long as we remember the encoding and write it back the same way.
+            return raw.decode("latin-1"), "latin-1"
+
+    def _write_text(self, path: str, data: bytes) -> str:
+        import tempfile
+
+        directory = os.path.dirname(path) or "/"
+
+        try:
+            mode = os.stat(path).st_mode & 0o7777
+        except OSError:
+            mode = None
+
+        try:
+            fd, temp_path = tempfile.mkstemp(dir=directory, prefix=".dfm-edit-", suffix=".tmp")
+        except OSError:
+            # The directory is not writable, but the file itself may still be;
+            # fall back to a plain in-place write rather than failing outright.
+            with open(path, "wb") as handle:
+                handle.write(data)
+            return "direct"
+
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+            if mode is not None:
+                os.chmod(temp_path, mode)
+            os.replace(temp_path, path)
+        except BaseException:
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+            raise
+
+        return "atomic"
+
+    async def read_text_file(self, path: str) -> dict:
+        if not path:
+            raise ValueError("Caminho inválido")
+        path = os.path.abspath(path)
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Item não existe: {path}")
+        if os.path.isdir(path):
+            raise IsADirectoryError(f"É uma pasta, não um arquivo: {path}")
+
+        try:
+            content, encoding = await asyncio.to_thread(self._read_text, path)
+        except PermissionError as e:
+            raise PermissionError(f"Sem permissão para ler: {path}") from e
+
+        stat = os.stat(path)
+
+        return {
+            "path": path,
+            "name": os.path.basename(path),
+            "content": content,
+            "encoding": encoding,
+            "size": stat.st_size,
+            "modified": int(stat.st_mtime),
+            "read_only": not os.access(path, os.W_OK),
+        }
+
+    async def write_text_file(
+        self,
+        path: str,
+        content: str,
+        expected_modified: int = 0,
+        encoding: str = "utf-8",
+        force: bool = False,
+    ) -> dict:
+        if not path:
+            raise ValueError("Caminho inválido")
+        # Resolve the link before writing: os.replace on a symlink would swap
+        # out the link itself instead of the file it points at.
+        path = os.path.realpath(os.path.abspath(path))
+        if os.path.isdir(path):
+            raise IsADirectoryError(f"É uma pasta, não um arquivo: {path}")
+
+        if os.path.exists(path) and expected_modified and not force:
+            current = int(os.stat(path).st_mtime)
+            if current != expected_modified:
+                return {"success": False, "stale": True, "path": path, "modified": current}
+
+        try:
+            data = content.encode(encoding or "utf-8")
+            used_encoding = encoding or "utf-8"
+        except (UnicodeEncodeError, LookupError):
+            # The file was latin-1 but now holds characters that encoding has
+            # no room for; UTF-8 is the only way to keep what was typed.
+            data = content.encode("utf-8")
+            used_encoding = "utf-8"
+
+        try:
+            await asyncio.to_thread(self._write_text, path, data)
+        except PermissionError as e:
+            raise PermissionError(f"Sem permissão para gravar: {path}") from e
+        except OSError as e:
+            raise OSError(f"Não foi possível gravar: {path} ({e.strerror or e})") from e
+
+        stat = os.stat(path)
+
+        return {
+            "success": True,
+            "path": path,
+            "size": stat.st_size,
+            "modified": int(stat.st_mtime),
+            "encoding": used_encoding,
+        }
+
+    async def create_file(self, parent_dir: str, name: str) -> dict:
+        parent_dir = self._normalize_dir(parent_dir)
+        self._validate_exists_dir(parent_dir)
+
+        if not name or "/" in name or "\\" in name or name in (".", ".."):
+            raise ValueError("Nome inválido")
+
+        new_path = os.path.join(parent_dir, name)
+        if os.path.exists(new_path):
+            raise FileExistsError(f"Já existe um item com esse nome: {new_path}")
+
+        try:
+            with open(new_path, "x"):
+                pass
+        except PermissionError as e:
+            raise PermissionError(f"Sem permissão: {e}") from e
+
+        return {"success": True, "path": new_path, "new_path": new_path}
+
+
+    # ------------------------------------------------------------------
     # Drives / mounted volumes
     # ------------------------------------------------------------------
 
