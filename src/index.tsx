@@ -412,32 +412,6 @@ function isArchiveFile(name: string): boolean {
   return archiveExtensions.some((ext) => lower.endsWith(ext));
 }
 
-/**
- * Which files the A button opens straight in the editor. The backend is the
- * real gate — it refuses anything binary or oversized — so this list only has
- * to cover what a Deck user plausibly wants to edit by hand.
- */
-const TEXT_EXTENSIONS = [
-  ".txt", ".md", ".markdown", ".log", ".cfg", ".conf", ".config", ".ini", ".json",
-  ".yaml", ".yml", ".toml", ".xml", ".csv", ".tsv", ".env", ".properties",
-  ".sh", ".bash", ".zsh", ".fish", ".py", ".js", ".mjs", ".cjs", ".ts", ".tsx",
-  ".jsx", ".css", ".scss", ".html", ".htm", ".sql", ".lua", ".vdf", ".acf",
-  ".desktop", ".service", ".rules", ".list", ".patch", ".diff", ".gitignore",
-  ".reg", ".bat", ".ps1", ".c", ".h", ".cpp", ".hpp", ".rs", ".go", ".java",
-];
-
-const TEXT_FILENAMES = [
-  "makefile", "dockerfile", "readme", "license", "changelog", "authors",
-  "hosts", "fstab", "environment", "profile", "bashrc", "zshrc",
-];
-
-function isTextFile(name: string): boolean {
-  const lower = name.toLowerCase();
-  if (TEXT_FILENAMES.includes(lower)) return true;
-  if (lower.startsWith(".") && !lower.slice(1).includes(".")) return true; // dotfiles: .bashrc, .gitignore
-  return TEXT_EXTENSIONS.some((ext) => lower.endsWith(ext));
-}
-
 function formatBytes(bytes: number): string {
   if (bytes === 0) return "0 B";
   const k = 1024;
@@ -485,8 +459,45 @@ function driveLabelFor(drive: DriveEntry): string {
 
 const listDir = callable<[string], { path: string; items: FileEntry[] }>("list_dir");
 const listDrives = callable<[], { drives: DriveEntry[] }>("list_drives");
-const getRecentPaths = callable<[], { paths: RecentEntry[] }>("get_recent_paths");
-const clearRecentPaths = callable<[], { success: boolean }>("clear_recent_paths");
+/**
+ * Visited folders are tracked here rather than over RPC. The frontend already
+ * knows every folder it opens, and keeping the list local means it cannot come
+ * up empty because of anything on the backend side.
+ */
+const RECENT_STORAGE_KEY = "decky-file-manager:recent-paths";
+const RECENT_LIMIT = 12;
+
+function loadRecentPaths(): string[] {
+  try {
+    const raw = window.localStorage.getItem(RECENT_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((entry) => typeof entry === "string" && entry) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveRecentPaths(paths: string[]): void {
+  try {
+    window.localStorage.setItem(RECENT_STORAGE_KEY, JSON.stringify(paths));
+  } catch {
+    // A full or unavailable store is not worth breaking navigation over.
+  }
+}
+
+function recordRecentPath(path: string): string[] {
+  const next = [path, ...loadRecentPaths().filter((entry) => entry !== path)].slice(0, RECENT_LIMIT);
+  saveRecentPaths(next);
+  return next;
+}
+
+function recentEntriesFrom(paths: string[]): RecentEntry[] {
+  return paths.map((entry) => ({
+    path: entry,
+    name: entry.split("/").filter(Boolean).pop() || entry,
+  }));
+}
 const readTextFile = callable<[string], {
   path: string;
   name: string;
@@ -871,6 +882,88 @@ function PaneView({
   );
 }
 
+/**
+ * An on-screen keyboard built out of ordinary buttons.
+ *
+ * Steam's own keyboard is attached to its TextField and could not be made to
+ * appear here, so rather than keep chasing it, this types without Steam's help
+ * at all: every key is a DialogButton inside a Focusable, exactly like the file
+ * list rows that the D-pad already drives. Nothing about it can fail for
+ * reasons outside this file.
+ */
+const KEY_ROWS_LOWER = [
+  ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"],
+  ["q", "w", "e", "r", "t", "y", "u", "i", "o", "p"],
+  ["a", "s", "d", "f", "g", "h", "j", "k", "l", "-"],
+  ["z", "x", "c", "v", "b", "n", "m", ".", "/", "_"],
+];
+
+const KEY_ROWS_UPPER = [
+  ["!", "@", "#", "$", "%", "^", "&", "*", "(", ")"],
+  ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"],
+  ["A", "S", "D", "F", "G", "H", "J", "K", "L", "+"],
+  ["Z", "X", "C", "V", "B", "N", "M", ",", "?", "="],
+];
+
+const KEY_ROWS_SYMBOLS = [
+  ["~", "`", "|", "\\", ":", ";", "\"", "'", "<", ">"],
+  ["[", "]", "{", "}", "(", ")", "/", "?", "!", "*"],
+  ["@", "#", "$", "%", "^", "&", "-", "_", "+", "="],
+  [".", ",", "0", "1", "2", "3", "4", "5", "6", "7"],
+];
+
+function OnScreenKeyboard({
+  onKey,
+  onBackspace,
+  onSpace,
+  onClear,
+  onDone,
+}: {
+  onKey: (character: string) => void;
+  onBackspace: () => void;
+  onSpace: () => void;
+  onClear: () => void;
+  onDone: () => void;
+}) {
+  const [mode, setMode] = useState<"lower" | "upper" | "symbols">("lower");
+  const rows = mode === "lower" ? KEY_ROWS_LOWER : mode === "upper" ? KEY_ROWS_UPPER : KEY_ROWS_SYMBOLS;
+
+  const keyStyle = {
+    minWidth: 0,
+    flex: "1 1 0%",
+    padding: "6px 0",
+    fontSize: 14,
+    fontFamily: "Consolas, 'Courier New', monospace",
+  } as const;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4, paddingTop: 6 }}>
+      {rows.map((row, rowIndex) => (
+        <Focusable key={rowIndex} style={{ display: "flex", gap: 4 }}>
+          {row.map((character, keyIndex) => (
+            <DialogButton key={`${rowIndex}-${keyIndex}`} style={keyStyle} onClick={() => onKey(character)}>
+              {character}
+            </DialogButton>
+          ))}
+        </Focusable>
+      ))}
+
+      <Focusable style={{ display: "flex", gap: 4 }}>
+        <DialogButton style={keyStyle} onClick={() => setMode(mode === "upper" ? "lower" : "upper")}>
+          {mode === "upper" ? "abc" : "ABC"}
+        </DialogButton>
+        <DialogButton style={keyStyle} onClick={() => setMode(mode === "symbols" ? "lower" : "symbols")}>
+          {mode === "symbols" ? "abc" : "#+="}
+        </DialogButton>
+        <DialogButton style={{ ...keyStyle, flex: "2 1 0%" }} onClick={onSpace}>{t("editor.space")}</DialogButton>
+        <DialogButton style={keyStyle} onClick={onBackspace}>{"\u232B"}</DialogButton>
+        <DialogButton style={keyStyle} onClick={onClear}>{t("editor.clear_line")}</DialogButton>
+        <DialogButton style={keyStyle} onClick={onDone}>{t("editor.apply")}</DialogButton>
+      </Focusable>
+    </div>
+  );
+}
+
 type EditorBuffer = {
   path: string;
   name: string;
@@ -988,20 +1081,28 @@ function EditorView({
       ) : null}
 
       {editingLine !== null ? (
-        <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", minWidth: 0 }}>
           <div style={{ fontSize: 12, opacity: 0.6, padding: "0 2px 6px" }}>
             {t("editor.edit_line").replace("{number}", String(editingLine + 1))}
           </div>
 
-          {/* The same Steam text field the path bar uses — this is what the
-              on-screen keyboard attaches to. */}
-          <div data-line-input style={{ padding: "2px 0 10px", minWidth: 0 }}>
+          {/* Steam's field is kept for anyone whose keyboard does come up, and
+              for a hardware keyboard; the buttons below type without it. */}
+          <div data-line-input style={{ padding: "2px 0 8px", minWidth: 0 }}>
             <TextField
               value={editingValue}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => onEditingValue(e.currentTarget.value)}
               bShowCopyAction={false}
             />
           </div>
+
+          <OnScreenKeyboard
+            onKey={(character) => onEditingValue(editingValue + character)}
+            onBackspace={() => onEditingValue(editingValue.slice(0, -1))}
+            onSpace={() => onEditingValue(editingValue + " ")}
+            onClear={() => onEditingValue("")}
+            onDone={onApplyLine}
+          />
 
           <Focusable style={{ display: "flex", gap: 8 }}>
             <DialogButton style={{ flex: 1 }} onClick={onApplyLine}>{t("editor.apply")}</DialogButton>
@@ -1322,13 +1423,7 @@ function FileManagerPage() {
   }, []);
 
   const refreshRecent = useCallback(async () => {
-    try {
-      const res = await getRecentPaths();
-      setRecentPaths(res.paths ?? []);
-    } catch (e) {
-      console.warn("recent: could not load history", e);
-      setRecentPaths([]);
-    }
+    setRecentPaths(recentEntriesFrom(loadRecentPaths()));
   }, []);
 
   const goToRecent = useCallback((entry: RecentEntry) => {
@@ -1359,7 +1454,7 @@ function FileManagerPage() {
     if (initialLoadDone.current) return;
     initialLoadDone.current = true;
     const [first] = panesRef.current;
-    void first.loadPath(first.pathRef.current).then(() => refreshRecent());
+    void first.loadPath(first.pathRef.current);
     void refreshDrives();
   }, [refreshDrives]);
 
@@ -2283,13 +2378,9 @@ function FileManagerPage() {
         }
         window.setTimeout(() => setDualPane(next), 0);
       };
-      const clearRecent = async () => {
-        try {
-          await clearRecentPaths();
-        } catch (e) {
-          console.warn("recent: could not clear history", e);
-        }
-        await refreshRecent();
+      const clearRecent = () => {
+        saveRecentPaths([]);
+        setRecentPaths([]);
       };
       const exitApp = () => {
         // Same teardown caveat as toggleSplit: close the menu first, navigate
@@ -2462,8 +2553,8 @@ function FileManagerPage() {
             })}
             {recentPaths.length ? (
               <MenuItem
-                onClick={() => void clearRecent()}
-                onSelected={() => void clearRecent()}
+                onClick={clearRecent}
+                onSelected={clearRecent}
               >
                 <span style={{ display: "flex", alignItems: "center", gap: 10 }}><HistoryIcon />{t("recent.clear")}</span>
               </MenuItem>
@@ -2501,8 +2592,8 @@ function FileManagerPage() {
             })}
             {recentPaths.length ? (
               <MenuItem
-                onClick={() => void clearRecent()}
-                onSelected={() => void clearRecent()}
+                onClick={clearRecent}
+                onSelected={clearRecent}
               >
                 <span style={{ display: "flex", alignItems: "center", gap: 10 }}><HistoryIcon />{t("recent.clear")}</span>
               </MenuItem>
@@ -2525,8 +2616,8 @@ function FileManagerPage() {
             })}
             {recentPaths.length ? (
               <MenuItem
-                onClick={() => void clearRecent()}
-                onSelected={() => void clearRecent()}
+                onClick={clearRecent}
+                onSelected={clearRecent}
               >
                 <span style={{ display: "flex", alignItems: "center", gap: 10 }}><HistoryIcon />{t("recent.clear")}</span>
               </MenuItem>
@@ -2623,9 +2714,10 @@ function FileManagerPage() {
       void pane.loadPath(item.path, undefined, true, item.path);
       return;
     }
-    // Archives already have their own action in the menu; everything that
-    // looks like text opens in the editor so A does something useful on it.
-    if (!isArchiveFile(item.name) && isTextFile(item.name)) {
+    // Archives have their own action in the menu; everything else opens in the
+    // editor and the backend decides — refusing binaries and oversized files
+    // with a message beats A silently doing nothing.
+    if (!isArchiveFile(item.name)) {
       openEditor(item);
     }
   }, [setActivePane, openEditor]);
@@ -2641,11 +2733,11 @@ function FileManagerPage() {
     setError(null);
   }, [activePane.path, setError]);
 
-  // The backend records a folder when it lists it, so re-read the history
-  // after each navigation rather than tracking it twice.
+  // Every navigation lands here, so this is where the history is written.
   useEffect(() => {
-    void refreshRecent();
-  }, [activePane.path, refreshRecent]);
+    if (!activePane.path) return;
+    setRecentPaths(recentEntriesFrom(recordRecentPath(activePane.path)));
+  }, [activePane.path]);
 
 
   const visiblePanes: PaneApi[] = dualPane ? [paneA, paneB] : [activePane];

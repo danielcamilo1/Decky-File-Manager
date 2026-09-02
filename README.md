@@ -57,7 +57,8 @@ Text files open in an editor right inside the plugin, so a config tweak no longe
 
 * Press **A** on a text file to open it, or pick **Edit file** from the **Y** options menu for any file.
 * The editor opens in place of the file list, so it is navigable with the D-pad like the rest of the plugin.
-* The file is shown as a list of numbered lines. Press **A** on a line to edit it — the Steam on-screen keyboard opens on the text field — then **Apply**. The same panel can **insert a line below** or **delete** the line.
+* The file is shown as a list of numbered lines. Press **A** on a line to edit it, then **Apply**. The same panel can **insert a line below** or **delete** the line.
+* **The editor carries its own on-screen keyboard** — a grid of keys driven with the D-pad and **A**, with letters, numbers and symbols. It does not rely on the Steam keyboard appearing.
 * Everything is reachable with the D-pad; **B** backs out of the line you are typing before it backs out of the file.
 * **Save** writes the file back in place, keeping its permissions.
 * UTF-8, UTF-16 and Latin-1 files are all read correctly, and saved back in the encoding — and with the byte-order mark — they came with.
@@ -70,6 +71,7 @@ Text files open in an editor right inside the plugin, so a config tweak no longe
 The last folders you opened are remembered, so getting back to one is a couple of presses rather than a walk down the tree.
 
 * The **Y** options menu lists them directly, most recent first — the same place the drive shortcuts live.
+* The history is kept by the plugin's own interface, so it does not depend on anything else being in sync.
 * The history holds the last 12 folders, survives a plugin reload, and drops folders that no longer exist.
 * **Clear history** empties it.
 
