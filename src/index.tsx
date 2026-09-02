@@ -341,6 +341,14 @@ function DriveIcon() {
   );
 }
 
+function ExitIcon() {
+  return (
+    <BaseIcon>
+      <path fillRule="evenodd" d="M7.5 3.75A1.5 1.5 0 0 0 6 5.25v13.5a1.5 1.5 0 0 0 1.5 1.5h6a1.5 1.5 0 0 0 1.5-1.5V15a.75.75 0 0 1 1.5 0v3.75a3 3 0 0 1-3 3h-6a3 3 0 0 1-3-3V5.25a3 3 0 0 1 3-3h6a3 3 0 0 1 3 3V9A.75.75 0 0 1 15 9V5.25a1.5 1.5 0 0 0-1.5-1.5h-6Zm10.72 4.72a.75.75 0 0 1 1.06 0l3 3a.75.75 0 0 1 0 1.06l-3 3a.75.75 0 1 1-1.06-1.06l1.72-1.72H9a.75.75 0 0 1 0-1.5h10.94l-1.72-1.72a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
+    </BaseIcon>
+  );
+}
+
 function RootIcon() {
   return (
     <BaseIcon>
@@ -830,6 +838,9 @@ const GAMEPAD_BUTTON_X = 2;
 const GAMEPAD_BUTTON_Y = 3;
 const GAMEPAD_BUTTON_LSHOULDER = 30;
 const GAMEPAD_BUTTON_RSHOULDER = 31;
+// A tap on B walks up one directory, so leaving from a deep path used to mean
+// one press per level. Holding B long enough to be deliberate exits outright.
+const EXIT_HOLD_MS = 800;
 
 function FileManagerPage() {
   const paneA = usePane(0, "/home/deck");
@@ -855,6 +866,9 @@ function FileManagerPage() {
   const [fileTypeFilter, setFileTypeFilter] = useState("all");
 
   const backTimeout = useRef<number | null>(null);
+  const exitHoldFrame = useRef<number | null>(null);
+  const [exitHoldActive, setExitHoldActive] = useState(false);
+  const [exitHoldFilled, setExitHoldFilled] = useState(false);
   const isLongBack = useRef(false);
   const backPressed = useRef(false);
   const backHadOverlayOnPress = useRef(false);
@@ -991,6 +1005,33 @@ function FileManagerPage() {
       active?.blur();
     } catch {
     }
+  }, []);
+
+  // Progress feedback for the exit hold. Without it the hold is invisible and
+  // people keep tapping B, which just walks them up one directory at a time.
+  const beginExitHold = useCallback(() => {
+    setExitHoldActive(true);
+    setExitHoldFilled(false);
+    if (exitHoldFrame.current !== null) {
+      window.cancelAnimationFrame(exitHoldFrame.current);
+    }
+    // The bar fills through a CSS transition, so the filled width has to land
+    // on a later frame than the mount or it snaps straight to the end state.
+    exitHoldFrame.current = window.requestAnimationFrame(() => {
+      exitHoldFrame.current = window.requestAnimationFrame(() => {
+        exitHoldFrame.current = null;
+        setExitHoldFilled(true);
+      });
+    });
+  }, []);
+
+  const endExitHold = useCallback(() => {
+    if (exitHoldFrame.current !== null) {
+      window.cancelAnimationFrame(exitHoldFrame.current);
+      exitHoldFrame.current = null;
+    }
+    setExitHoldActive(false);
+    setExitHoldFilled(false);
   }, []);
 
   const openContextMenuRef = useRef<(item: FileEntry | null) => void>(() => null);
@@ -1456,10 +1497,13 @@ function FileManagerPage() {
             if (backTimeout.current) {
               window.clearTimeout(backTimeout.current);
             }
+            beginExitHold();
             backTimeout.current = window.setTimeout(() => {
               isLongBack.current = true;
+              backTimeout.current = null;
+              endExitHold();
               exitPluginRef.current();
-            }, 200);
+            }, EXIT_HOLD_MS);
           } else {
             if (!backPressed.current) return;
             backPressed.current = false;
@@ -1467,6 +1511,7 @@ function FileManagerPage() {
               window.clearTimeout(backTimeout.current);
               backTimeout.current = null;
             }
+            endExitHold();
             const now = Date.now();
             if (
               backHadOverlayOnPress.current ||
@@ -1492,13 +1537,14 @@ function FileManagerPage() {
         window.clearTimeout(backTimeout.current);
         backTimeout.current = null;
       }
+      endExitHold();
       if (typeof unregister === "function") {
         unregister();
       } else if (unregister?.Unregister) {
         unregister.Unregister();
       }
     };
-  }, [isAnyModalOrMenuOpen, isDropdownMenuOpenInDom, isShortcutBlocked, leavePathInput]);
+  }, [beginExitHold, endExitHold, isAnyModalOrMenuOpen, isDropdownMenuOpenInDom, isShortcutBlocked, leavePathInput]);
 
   useEffect(() => {
     if (renameRequested) {
@@ -1926,6 +1972,15 @@ function FileManagerPage() {
         }
         window.setTimeout(() => setDualPane(next), 0);
       };
+      const exitApp = () => {
+        // Same teardown caveat as toggleSplit: close the menu first, navigate
+        // away on the next tick.
+        if (contextMenuInstance.current) {
+          contextMenuInstance.current.Hide();
+          contextMenuInstance.current = null;
+        }
+        window.setTimeout(() => exitPluginRef.current(), 0);
+      };
 
       if (item) {
         const copy = async () => {
@@ -2068,6 +2123,12 @@ function FileManagerPage() {
             <MenuItem onClick={properties} onSelected={properties}>
               <span style={{ display: "flex", alignItems: "center", gap: 10 }}><PropertiesIcon />{t("menu.properties")}</span>
             </MenuItem>
+
+            <MenuSeparator />
+
+            <MenuItem onClick={exitApp} onSelected={exitApp}>
+              <span style={{ display: "flex", alignItems: "center", gap: 10 }}><ExitIcon />{t("menu.exit")}</span>
+            </MenuItem>
           </Menu>,
           anchor,
         );
@@ -2093,6 +2154,10 @@ function FileManagerPage() {
                 </MenuItem>
               );
             })}
+            <MenuSeparator />
+            <MenuItem onClick={exitApp} onSelected={exitApp}>
+              <span style={{ display: "flex", alignItems: "center", gap: 10 }}><ExitIcon />{t("menu.exit")}</span>
+            </MenuItem>
           </Menu>,
           anchor,
         );
@@ -2904,6 +2969,47 @@ function FileManagerPage() {
         </>
       ) : null}
 
+      {exitHoldActive ? (
+        <div
+          style={{
+            position: "fixed",
+            left: 0,
+            right: 0,
+            bottom: 76,
+            display: "flex",
+            justifyContent: "center",
+            pointerEvents: "none",
+            zIndex: 1000,
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+              minWidth: 220,
+              padding: "10px 16px",
+              borderRadius: 6,
+              background: "rgba(10,16,24,0.92)",
+              border: "1px solid rgba(255,255,255,0.12)",
+              boxShadow: "0 6px 24px rgba(0,0,0,0.45)",
+            }}
+          >
+            <span style={{ fontSize: 12, letterSpacing: 0.3, textAlign: "center", opacity: 0.9 }}>{t("exit.holding")}</span>
+            <div style={{ height: 4, borderRadius: 2, background: "rgba(255,255,255,0.15)", overflow: "hidden" }}>
+              <div
+                style={{
+                  height: "100%",
+                  width: exitHoldFilled ? "100%" : "0%",
+                  background: "rgba(120,180,255,0.95)",
+                  transition: `width ${EXIT_HOLD_MS}ms linear`,
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <div
         style={{
           position: "fixed",
@@ -2925,6 +3031,7 @@ function FileManagerPage() {
           <div style={{ display: "flex", alignItems: "center", gap: 14, fontSize: 11, opacity: 0.55, whiteSpace: "nowrap", overflow: "hidden" }}>
             <span>{`X · ${dualPane ? t("hint.split_close") : t("hint.split_open")}`}</span>
             {dualPane ? <span>{`L1 / R1 · ${t("hint.switch_panel")}`}</span> : null}
+            <span>{t("hint.hold_exit")}</span>
           </div>
         ) : <div />}
 
