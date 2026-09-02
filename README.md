@@ -56,6 +56,7 @@ With the split open, the **Y** options menu gains **Copy to other panel** and **
 Text files open in an editor right inside the plugin, so a config tweak no longer means a trip to Desktop Mode.
 
 * Press **A** on a text file to open it, or pick **Edit file** from the **Y** options menu for any file.
+* The editor opens in place of the file list, so it is navigable with the D-pad like the rest of the plugin.
 * The file is shown as a list of numbered lines. Press **A** on a line to edit it — the Steam on-screen keyboard opens on the text field — then **Apply**. The same panel can **insert a line below** or **delete** the line.
 * Everything is reachable with the D-pad; **B** backs out of the line you are typing before it backs out of the file.
 * **Save** writes the file back in place, keeping its permissions.
@@ -68,7 +69,7 @@ Text files open in an editor right inside the plugin, so a config tweak no longe
 
 The last folders you opened are remembered, so getting back to one is a couple of presses rather than a walk down the tree.
 
-* **Recent folders** in the **Y** options menu lists them, most recent first.
+* The **Y** options menu lists them directly, most recent first — the same place the drive shortcuts live.
 * The history holds the last 12 folders, survives a plugin reload, and drops folders that no longer exist.
 * **Clear history** empties it.
 
