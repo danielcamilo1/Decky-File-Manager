@@ -31,6 +31,7 @@ Manage your files and folders without leaving Gaming Mode. Browse directories, c
 * **Copy and move directly between panels**, the way desktop file managers work.
 * **Quick access to connected drives** — SD card, USB sticks and external drives.
 * **Built-in text editor** — open, edit and save text files without leaving Gaming Mode.
+* **Recent folders** — jump straight back to the last folders you visited.
 * File and folder management.
 * Copy, move, rename, and delete operations.
 * Archive extraction (zip, tar and variants).
@@ -56,9 +57,18 @@ Text files open in an editor right inside the plugin, so a config tweak no longe
 
 * Press **A** on a text file to open it, or pick **Edit file** from the **Y** options menu for any file.
 * The on-screen keyboard handles typing; **Save** writes the file back in place, keeping its permissions.
+* UTF-8, UTF-16 and Latin-1 files are all read correctly, and saved back in the encoding — and with the byte-order mark — they came with.
 * Files that are not text, or larger than 1 MB, are refused rather than mangled.
 * Closing with unsaved changes asks before discarding them, and a file changed on disk while you were editing offers **Overwrite** or **Reload**.
 * **New file** in the **Y** options menu creates an empty file to start from.
+
+## Recent folders
+
+The last folders you opened are remembered, so getting back to one is a couple of presses rather than a walk down the tree.
+
+* **Recent folders** in the **Y** options menu lists them, most recent first.
+* The history holds the last 12 folders, survives a plugin reload, and drops folders that no longer exist.
+* **Clear history** empties it.
 
 ## Drives
 

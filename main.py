@@ -8,6 +8,7 @@ class Plugin:
         self._clipboard_path: str | None = None
         self._clipboard_kind: str | None = None
         self._last_path: str | None = None
+        self._recent_paths: list = []
         self._settings: dict = {"default_path": "/home/deck"}
         self._settings_file = os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, "settings.json")
         self._runtime_file = os.path.join(decky.DECKY_PLUGIN_RUNTIME_DIR, "runtime.json")
@@ -64,12 +65,20 @@ class Plugin:
                     self._last_path = os.path.abspath(last_path)
                 else:
                     self._last_path = None
+
+                recent = data.get("recent_paths") or []
+                self._recent_paths = [
+                    os.path.abspath(entry) for entry in recent
+                    if isinstance(entry, str) and entry
+                ][:self._RECENT_LIMIT]
             else:
                 self._last_path = None
+                self._recent_paths = []
         except (ValueError, OSError):
             self._clipboard_path = None
             self._clipboard_kind = None
             self._last_path = None
+            self._recent_paths = []
 
     def _save_runtime_state(self) -> None:
         self._ensure_runtime_dir()
@@ -81,9 +90,21 @@ class Plugin:
                 "kind": self._clipboard_kind,
             },
             "last_path": self._last_path,
+            "recent_paths": self._recent_paths,
         }
         with open(self._runtime_file, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+
+    # How many folders back the history reaches. Long enough to cover a
+    # session's worth of jumping around, short enough to stay a menu.
+    _RECENT_LIMIT = 12
+
+    def _record_recent(self, path: str) -> None:
+        """Most recent first, no duplicates, capped at _RECENT_LIMIT."""
+        path = os.path.abspath(path)
+        self._recent_paths = [entry for entry in self._recent_paths if entry != path]
+        self._recent_paths.insert(0, path)
+        del self._recent_paths[self._RECENT_LIMIT:]
 
     def _normalize_dir(self, path: str) -> str:
         if not path:
@@ -272,6 +293,7 @@ class Plugin:
         path = self._normalize_dir(path)
         self._validate_exists_dir(path)
         self._last_path = path
+        self._record_recent(path)
         self._save_runtime_state()
 
         entries = []
@@ -589,9 +611,52 @@ class Plugin:
     # larger than this is worth editing with a gamepad anyway.
     _EDITOR_MAX_BYTES = 1024 * 1024
 
-    @staticmethod
-    def _looks_binary(data: bytes) -> bool:
-        return b"\x00" in data
+    # A UTF-16 file is full of NUL bytes, so sniffing raw bytes for NUL would
+    # reject perfectly ordinary XML written on Windows. Detect the encoding
+    # from the byte-order mark first, and only judge the *decoded* text.
+    # UTF-32 BOMs must be tested before UTF-16: b"\xff\xfe\x00\x00" starts
+    # with the UTF-16-LE mark.
+    _BOM_ENCODINGS = (
+        (b"\xff\xfe\x00\x00", "utf-32-le"),
+        (b"\x00\x00\xfe\xff", "utf-32-be"),
+        (b"\xef\xbb\xbf", "utf-8-bom"),
+        (b"\xff\xfe", "utf-16-le"),
+        (b"\xfe\xff", "utf-16-be"),
+    )
+
+    # Byte-order mark to re-emit, and the codec to use, per stored token.
+    _ENCODING_BOMS = {
+        "utf-32-le": b"\xff\xfe\x00\x00",
+        "utf-32-be": b"\x00\x00\xfe\xff",
+        "utf-8-bom": b"\xef\xbb\xbf",
+        "utf-16-le": b"\xff\xfe",
+        "utf-16-be": b"\xfe\xff",
+    }
+    _ENCODING_CODECS = {"utf-8-bom": "utf-8"}
+
+    def _decode_text(self, raw: bytes) -> tuple:
+        for bom, token in self._BOM_ENCODINGS:
+            if raw.startswith(bom):
+                try:
+                    return raw[len(bom):].decode(self._ENCODING_CODECS.get(token, token)), token
+                except UnicodeDecodeError:
+                    break
+
+        try:
+            return raw.decode("utf-8"), "utf-8"
+        except UnicodeDecodeError:
+            pass
+
+        if b"\x00" in raw:
+            raise ValueError("Arquivo binário não pode ser editado")
+
+        # latin-1 decodes any byte string and re-encodes to exactly the same
+        # bytes, so a file we could not read as UTF-8 still round-trips.
+        return raw.decode("latin-1"), "latin-1"
+
+    def _encode_text(self, text: str, token: str) -> bytes:
+        codec = self._ENCODING_CODECS.get(token, token or "utf-8")
+        return self._ENCODING_BOMS.get(token, b"") + text.encode(codec)
 
     def _read_text(self, path: str) -> tuple:
         with open(path, "rb") as handle:
@@ -599,16 +664,14 @@ class Plugin:
 
         if len(raw) > self._EDITOR_MAX_BYTES:
             raise ValueError("Arquivo grande demais para editar")
-        if self._looks_binary(raw):
+
+        text, encoding = self._decode_text(raw)
+
+        # A NUL that survives decoding means this was never text.
+        if "\x00" in text:
             raise ValueError("Arquivo binário não pode ser editado")
 
-        try:
-            return raw.decode("utf-8"), "utf-8"
-        except UnicodeDecodeError:
-            # latin-1 decodes any byte string and re-encodes to the exact same
-            # bytes, so a file we could not read as UTF-8 still round-trips as
-            # long as we remember the encoding and write it back the same way.
-            return raw.decode("latin-1"), "latin-1"
+        return text, encoding
 
     def _write_text(self, path: str, data: bytes) -> str:
         import tempfile
@@ -694,7 +757,7 @@ class Plugin:
                 return {"success": False, "stale": True, "path": path, "modified": current}
 
         try:
-            data = content.encode(encoding or "utf-8")
+            data = self._encode_text(content, encoding or "utf-8")
             used_encoding = encoding or "utf-8"
         except (UnicodeEncodeError, LookupError):
             # The file was latin-1 but now holds characters that encoding has
@@ -737,6 +800,21 @@ class Plugin:
             raise PermissionError(f"Sem permissão: {e}") from e
 
         return {"success": True, "path": new_path, "new_path": new_path}
+
+    async def get_recent_paths(self) -> dict:
+        """Recently visited folders, most recent first, minus any that are gone."""
+        existing = [entry for entry in self._recent_paths if os.path.isdir(entry)]
+
+        if existing != self._recent_paths:
+            self._recent_paths = existing
+            self._save_runtime_state()
+
+        return {"paths": [{"path": entry, "name": os.path.basename(entry) or entry} for entry in existing]}
+
+    async def clear_recent_paths(self) -> dict:
+        self._recent_paths = []
+        self._save_runtime_state()
+        return {"success": True}
 
 
     # ------------------------------------------------------------------

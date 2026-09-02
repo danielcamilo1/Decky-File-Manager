@@ -341,6 +341,15 @@ function DriveIcon() {
   );
 }
 
+function HistoryIcon() {
+  return (
+    <BaseIcon>
+      <path fillRule="evenodd" d="M12 2.25a9.75 9.75 0 1 0 9.75 9.75.75.75 0 0 0-1.5 0A8.25 8.25 0 1 1 12 3.75c2.3 0 4.36 1.02 5.76 2.63h-2.26a.75.75 0 0 0 0 1.5h3.9a.75.75 0 0 0 .75-.75v-3.9a.75.75 0 0 0-1.5 0v1.96A9.72 9.72 0 0 0 12 2.25Z" clipRule="evenodd" />
+      <path d="M12.75 7.5a.75.75 0 0 0-1.5 0v5.06l3.22 1.86a.75.75 0 1 0 .75-1.3l-2.47-1.43V7.5Z" />
+    </BaseIcon>
+  );
+}
+
 function ExitIcon() {
   return (
     <BaseIcon>
@@ -363,6 +372,11 @@ type FileEntry = {
   is_dir: boolean;
   size: number | null;
   modified: number;
+};
+
+type RecentEntry = {
+  name: string;
+  path: string;
 };
 
 type DriveKind = "home" | "root" | "sdcard" | "usb" | "internal";
@@ -479,6 +493,8 @@ function driveLabelFor(drive: DriveEntry): string {
 
 const listDir = callable<[string], { path: string; items: FileEntry[] }>("list_dir");
 const listDrives = callable<[], { drives: DriveEntry[] }>("list_drives");
+const getRecentPaths = callable<[], { paths: RecentEntry[] }>("get_recent_paths");
+const clearRecentPaths = callable<[], { success: boolean }>("clear_recent_paths");
 
 type PaneIndex = 0 | 1;
 
@@ -841,6 +857,9 @@ const GAMEPAD_BUTTON_RSHOULDER = 31;
 // A tap on B walks up one directory, so leaving from a deep path used to mean
 // one press per level. Holding B long enough to be deliberate exits outright.
 const EXIT_HOLD_MS = 800;
+// How long after a modal closes a B press still counts as "that was the
+// dismissal", rather than a fresh request to walk up a directory.
+const OVERLAY_GRACE_MS = 400;
 
 function FileManagerPage() {
   const paneA = usePane(0, "/home/deck");
@@ -1066,6 +1085,23 @@ function FileManagerPage() {
     }
   }, []);
 
+  const refreshRecent = useCallback(async () => {
+    try {
+      const res = await getRecentPaths();
+      setRecentPaths(res.paths ?? []);
+    } catch (e) {
+      console.warn("recent: could not load history", e);
+      setRecentPaths([]);
+    }
+  }, [getRecentPaths]);
+
+  const goToRecent = useCallback((entry: RecentEntry) => {
+    setRecentRequested(false);
+    const pane = panesRef.current[activePaneIndexRef.current];
+    pane.setError(null);
+    void pane.loadPath(entry.path, t("error.directory_not_found"));
+  }, []);
+
   const initialLoadDone = useRef(false);
 
   const [i18nVersion, setI18nVersion] = useState(0);
@@ -1206,6 +1242,10 @@ function FileManagerPage() {
   const conflictPrimaryRef = useRef<HTMLButtonElement | null>(null);
   const permissionPrimaryRef = useRef<HTMLButtonElement | null>(null);
 
+  const [recentRequested, setRecentRequested] = useState(false);
+  const [recentPaths, setRecentPaths] = useState<RecentEntry[]>([]);
+  const recentPrimaryRef = useRef<HTMLButtonElement | null>(null);
+
   const [editorRequested, setEditorRequested] = useState(false);
   const [editorPath, setEditorPath] = useState<string | null>(null);
   const [editorName, setEditorName] = useState<string>("");
@@ -1233,8 +1273,26 @@ function FileManagerPage() {
   const createFileRef = useRef<HTMLDivElement | null>(null);
   const createFileConfirmRef = useRef<HTMLButtonElement | null>(null);
   const fileManagerScopeRef = useRef<HTMLDivElement | null>(null);
-  const hasActiveModal = renameRequested || deleteRequested || propertiesRequested || createFolderRequested || createFileRequested || editorRequested || !!conflictModal || !!operationModal || !!permissionModal;
+  const hasActiveModal = renameRequested || deleteRequested || propertiesRequested || createFolderRequested || createFileRequested || editorRequested || recentRequested || !!conflictModal || !!operationModal || !!permissionModal;
   hasActiveModalRef.current = hasActiveModal;
+
+  // Steam dismisses a modal on the B *press*, through the Focusable's own
+  // cancel handling, and our listener sees the *release* afterwards. By then
+  // the modal is gone, so the release used to fall through to "go up one
+  // directory" — closing the editor and leaving the folder in one press.
+  // Recording when the overlay went away arms the grace window below.
+  const overlayWasOpenRef = useRef(false);
+
+  useEffect(() => {
+    if (hasActiveModal) {
+      overlayWasOpenRef.current = true;
+      return;
+    }
+    if (overlayWasOpenRef.current) {
+      overlayWasOpenRef.current = false;
+      lastOverlayRemovedAt.current = Date.now();
+    }
+  }, [hasActiveModal]);
 
   const isDropdownMenuOpenInDom = useCallback(() => {
     if (typeof document === "undefined") return false;
@@ -1370,8 +1428,8 @@ function FileManagerPage() {
       }
     }
 
-    return propertiesRequested || renameRequested || deleteRequested || createFolderRequested || createFileRequested || editorRequested || !!conflictModal || !!operationModal || !!permissionModal;
-  }, [propertiesRequested, renameRequested, deleteRequested, createFolderRequested, createFileRequested, editorRequested, conflictModal, operationModal, permissionModal]);
+    return propertiesRequested || renameRequested || deleteRequested || createFolderRequested || createFileRequested || editorRequested || recentRequested || !!conflictModal || !!operationModal || !!permissionModal;
+  }, [propertiesRequested, renameRequested, deleteRequested, createFolderRequested, createFileRequested, editorRequested, recentRequested, conflictModal, operationModal, permissionModal]);
 
   useEffect(() => {
     const input = (window as any).SteamClient?.Input;
@@ -1430,7 +1488,7 @@ function FileManagerPage() {
               return;
             }
 
-            const hasOverlay = isAnyModalOrMenuOpen();
+            const hasOverlay = hasActiveModalRef.current || isAnyModalOrMenuOpen();
             const dropdownMenuOpen = isDropdownMenuOpenInDom();
             const shouldConsumeBack = hasOverlay || dropdownMenuOpen || Boolean(activeElement?.closest("[role='menu'], [role='dialog'], [data-modal-root], [data-decky-modal], [aria-expanded='true'], [aria-haspopup], .contextMenu, .contextMenuContents, .BasicContextMenuModal"));
 
@@ -1497,6 +1555,12 @@ function FileManagerPage() {
             if (backTimeout.current) {
               window.clearTimeout(backTimeout.current);
             }
+            // A press that only just dismissed a modal must not start the
+            // hold-to-exit timer either.
+            if (lastOverlayRemovedAt.current && Date.now() - lastOverlayRemovedAt.current < OVERLAY_GRACE_MS) {
+              backConsumedOnPress.current = true;
+              return;
+            }
             beginExitHold();
             backTimeout.current = window.setTimeout(() => {
               isLongBack.current = true;
@@ -1516,7 +1580,7 @@ function FileManagerPage() {
             if (
               backHadOverlayOnPress.current ||
               backConsumedOnPress.current ||
-              (lastOverlayRemovedAt.current && now - lastOverlayRemovedAt.current < 400)
+              (lastOverlayRemovedAt.current && now - lastOverlayRemovedAt.current < OVERLAY_GRACE_MS)
             ) {
               backHadOverlayOnPress.current = false;
               backConsumedOnPress.current = false;
@@ -1601,6 +1665,14 @@ function FileManagerPage() {
     }, 60);
     return () => window.clearTimeout(timeout);
   }, [editorRequested, editorLoading]);
+
+  useEffect(() => {
+    if (!recentRequested) return;
+    const timeout = window.setTimeout(() => {
+      try { recentPrimaryRef.current?.focus(); } catch {}
+    }, 50);
+    return () => window.clearTimeout(timeout);
+  }, [recentRequested]);
 
   useEffect(() => {
     if (!conflictModal) return;
@@ -1806,7 +1878,13 @@ function FileManagerPage() {
    */
   const editorErrorMessage = useCallback((e: any, fallbackKey: string) => {
     const message = String(e?.message ?? t(fallbackKey));
-    return message.toLowerCase().includes("permissão") ? t("permission.denied") : message;
+    const lower = message.toLowerCase();
+    // Backend exception text is Portuguese by convention; match on it so the
+    // reason a file was refused reads in the user's own language.
+    if (lower.includes("permissão")) return t("permission.denied");
+    if (lower.includes("binário")) return t("editor.error_binary");
+    if (lower.includes("grande demais")) return t("editor.error_too_large");
+    return message;
   }, []);
 
   const openEditor = useCallback((item: FileEntry) => {
@@ -1972,6 +2050,15 @@ function FileManagerPage() {
         }
         window.setTimeout(() => setDualPane(next), 0);
       };
+      const openRecent = () => {
+        // Same teardown caveat as toggleSplit: close the menu first, open the
+        // modal on the next tick.
+        if (contextMenuInstance.current) {
+          contextMenuInstance.current.Hide();
+          contextMenuInstance.current = null;
+        }
+        window.setTimeout(() => setRecentRequested(true), 0);
+      };
       const exitApp = () => {
         // Same teardown caveat as toggleSplit: close the menu first, navigate
         // away on the next tick.
@@ -2126,6 +2213,10 @@ function FileManagerPage() {
 
             <MenuSeparator />
 
+            <MenuItem onClick={openRecent} onSelected={openRecent}>
+              <span style={{ display: "flex", alignItems: "center", gap: 10 }}><HistoryIcon />{t("menu.recent")}</span>
+            </MenuItem>
+
             <MenuItem onClick={exitApp} onSelected={exitApp}>
               <span style={{ display: "flex", alignItems: "center", gap: 10 }}><ExitIcon />{t("menu.exit")}</span>
             </MenuItem>
@@ -2155,6 +2246,9 @@ function FileManagerPage() {
               );
             })}
             <MenuSeparator />
+            <MenuItem onClick={openRecent} onSelected={openRecent}>
+              <span style={{ display: "flex", alignItems: "center", gap: 10 }}><HistoryIcon />{t("menu.recent")}</span>
+            </MenuItem>
             <MenuItem onClick={exitApp} onSelected={exitApp}>
               <span style={{ display: "flex", alignItems: "center", gap: 10 }}><ExitIcon />{t("menu.exit")}</span>
             </MenuItem>
@@ -2261,6 +2355,12 @@ function FileManagerPage() {
   useEffect(() => {
     setError(null);
   }, [activePane.path, setError]);
+
+  // The backend records a folder when it lists it, so re-read the history
+  // after each navigation rather than tracking it twice.
+  useEffect(() => {
+    void refreshRecent();
+  }, [activePane.path, refreshRecent]);
 
   const visiblePanes: PaneApi[] = dualPane ? [paneA, paneB] : [activePane];
 
@@ -2551,6 +2651,82 @@ function FileManagerPage() {
                           <DialogButton onClick={() => { setCreateFolderRequested(false); setCreateFolderName(""); }}>
                             {t("action.cancel")}
                           </DialogButton>
+                        </div>
+                      </Focusable>
+                    </div>
+                  </Focusable>
+                </ModalFocusScope>
+              </DialogBody>
+            </ModalRoot>
+          )}
+
+          {recentRequested && (
+            <ModalRoot
+              show={true}
+              bHideMainWindowForPopouts={true}
+              onCancel={() => setRecentRequested(false)}
+            >
+              <DialogBody>
+                <ModalFocusScope>
+                  <Focusable
+                    navEntryPreferPosition={NavEntryPositionPreferences.MAINTAIN_X}
+                    onCancel={() => setRecentRequested(false)}
+                    onCancelButton={() => setRecentRequested(false)}
+                    style={{ outline: "none", display: "flex", flexDirection: "column", alignItems: "stretch", minWidth: 0 }}
+                  >
+                    <div style={{ textAlign: "center", padding: "6px 0 12px" }}>
+                      <h1 style={{ margin: 0 }}>{t("modal.recent")}</h1>
+                    </div>
+
+                    {recentPaths.length === 0 ? (
+                      <div style={{ padding: "12px 0", textAlign: "center", opacity: 0.6 }}>{t("recent.empty")}</div>
+                    ) : (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: "46vh", overflowY: "auto", minWidth: 0 }}>
+                        {recentPaths.map((entry, index) => (
+                          <Focusable key={entry.path} navEntryPreferPosition={NavEntryPositionPreferences.MAINTAIN_X}>
+                            <div style={{ width: "100%", minWidth: 0 }}>
+                              <DialogButton
+                                ref={(index === 0 ? recentPrimaryRef : undefined) as any}
+                                onClick={() => goToRecent(entry)}
+                              >
+                                <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, textAlign: "left" }}>
+                                  <FolderIcon />
+                                  <div style={{ display: "flex", flexDirection: "column", minWidth: 0, alignItems: "flex-start" }}>
+                                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}>
+                                      {entry.name}
+                                    </span>
+                                    <span style={{ fontSize: 11, opacity: 0.55, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}>
+                                      {shortPath(entry.path, 3)}
+                                    </span>
+                                  </div>
+                                </div>
+                              </DialogButton>
+                            </div>
+                          </Focusable>
+                        ))}
+                      </div>
+                    )}
+
+                    <div style={{ display: "flex", flexDirection: "column", gap: 12, width: "100%", marginTop: 16 }}>
+                      {recentPaths.length ? (
+                        <Focusable navEntryPreferPosition={NavEntryPositionPreferences.MAINTAIN_X}>
+                          <div style={{ width: "100%" }}>
+                            <DialogButton onClick={async () => {
+                              try {
+                                await clearRecentPaths();
+                              } catch (e) {
+                                console.warn("recent: could not clear history", e);
+                              }
+                              await refreshRecent();
+                            }}>
+                              {t("recent.clear")}
+                            </DialogButton>
+                          </div>
+                        </Focusable>
+                      ) : null}
+                      <Focusable navEntryPreferPosition={NavEntryPositionPreferences.MAINTAIN_X}>
+                        <div style={{ width: "100%" }}>
+                          <DialogButton onClick={() => setRecentRequested(false)}>{t("action.close")}</DialogButton>
                         </div>
                       </Focusable>
                     </div>

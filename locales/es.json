@@ -118,5 +118,11 @@
   "editor.reload": "Recargar",
   "error.could_not_open_file": "No se pudo abrir el archivo.",
   "error.could_not_save_file": "No se pudo guardar el archivo.",
-  "error.could_not_create_file": "No se pudo crear el archivo."
+  "error.could_not_create_file": "No se pudo crear el archivo.",
+  "menu.recent": "Carpetas recientes",
+  "modal.recent": "Carpetas recientes",
+  "recent.empty": "Aún no se ha visitado ninguna carpeta.",
+  "recent.clear": "Borrar historial",
+  "editor.error_binary": "Este archivo no es texto y no se puede editar.",
+  "editor.error_too_large": "Este archivo es demasiado grande para editar (límite de 1 MB)."
 }
