@@ -124,5 +124,12 @@
   "recent.empty": "No folders visited yet.",
   "recent.clear": "Clear history",
   "editor.error_binary": "This file is not text and cannot be edited.",
-  "editor.error_too_large": "This file is too large to edit (limit 1 MB)."
+  "editor.error_too_large": "This file is too large to edit (limit 1 MB).",
+  "editor.hint": "Press A on a line to edit it with the on-screen keyboard.",
+  "editor.edit_line": "Line {number}",
+  "editor.apply": "Apply",
+  "editor.line_empty": "(empty line)",
+  "editor.insert_line": "Insert line",
+  "editor.delete_line": "Delete line",
+  "recent.failed": "Could not load the folder history."
 }

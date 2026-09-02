@@ -124,5 +124,12 @@
   "recent.empty": "Noch keine Ordner besucht.",
   "recent.clear": "Verlauf löschen",
   "editor.error_binary": "Diese Datei ist kein Text und kann nicht bearbeitet werden.",
-  "editor.error_too_large": "Diese Datei ist zu groß zum Bearbeiten (Grenze 1 MB)."
+  "editor.error_too_large": "Diese Datei ist zu groß zum Bearbeiten (Grenze 1 MB).",
+  "editor.hint": "A auf einer Zeile bearbeitet sie mit der Bildschirmtastatur.",
+  "editor.edit_line": "Zeile {number}",
+  "editor.apply": "Übernehmen",
+  "editor.line_empty": "(leere Zeile)",
+  "editor.insert_line": "Zeile einfügen",
+  "editor.delete_line": "Zeile löschen",
+  "recent.failed": "Der Ordnerverlauf konnte nicht geladen werden."
 }
