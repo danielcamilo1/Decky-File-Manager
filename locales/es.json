@@ -124,5 +124,12 @@
   "recent.empty": "Aún no se ha visitado ninguna carpeta.",
   "recent.clear": "Borrar historial",
   "editor.error_binary": "Este archivo no es texto y no se puede editar.",
-  "editor.error_too_large": "Este archivo es demasiado grande para editar (límite de 1 MB)."
+  "editor.error_too_large": "Este archivo es demasiado grande para editar (límite de 1 MB).",
+  "editor.hint": "Pulsa A en una línea para editarla con el teclado en pantalla.",
+  "editor.edit_line": "Línea {number}",
+  "editor.apply": "Aplicar",
+  "editor.line_empty": "(línea vacía)",
+  "editor.insert_line": "Insertar línea",
+  "editor.delete_line": "Eliminar línea",
+  "recent.failed": "No se pudo cargar el historial de carpetas."
 }

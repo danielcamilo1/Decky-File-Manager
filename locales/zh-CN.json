@@ -124,5 +124,12 @@
   "recent.empty": "尚未访问任何文件夹。",
   "recent.clear": "清除历史记录",
   "editor.error_binary": "此文件不是文本，无法编辑。",
-  "editor.error_too_large": "此文件过大，无法编辑（上限 1 MB）。"
+  "editor.error_too_large": "此文件过大，无法编辑（上限 1 MB）。",
+  "editor.hint": "在某一行上按 A 可用屏幕键盘编辑该行。",
+  "editor.edit_line": "第 {number} 行",
+  "editor.apply": "应用",
+  "editor.line_empty": "（空行）",
+  "editor.insert_line": "插入行",
+  "editor.delete_line": "删除行",
+  "recent.failed": "无法加载文件夹历史记录。"
 }

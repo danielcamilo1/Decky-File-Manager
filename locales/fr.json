@@ -124,5 +124,12 @@
   "recent.empty": "Aucun dossier visité pour l'instant.",
   "recent.clear": "Effacer l'historique",
   "editor.error_binary": "Ce fichier n'est pas du texte et ne peut pas être modifié.",
-  "editor.error_too_large": "Ce fichier est trop volumineux pour être modifié (limite de 1 Mo)."
+  "editor.error_too_large": "Ce fichier est trop volumineux pour être modifié (limite de 1 Mo).",
+  "editor.hint": "Appuyez sur A sur une ligne pour la modifier avec le clavier virtuel.",
+  "editor.edit_line": "Ligne {number}",
+  "editor.apply": "Appliquer",
+  "editor.line_empty": "(ligne vide)",
+  "editor.insert_line": "Insérer une ligne",
+  "editor.delete_line": "Supprimer la ligne",
+  "recent.failed": "Impossible de charger l'historique des dossiers."
 }

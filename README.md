@@ -56,7 +56,8 @@ With the split open, the **Y** options menu gains **Copy to other panel** and **
 Text files open in an editor right inside the plugin, so a config tweak no longer means a trip to Desktop Mode.
 
 * Press **A** on a text file to open it, or pick **Edit file** from the **Y** options menu for any file.
-* The on-screen keyboard handles typing; **Save** writes the file back in place, keeping its permissions.
+* The file is shown as a list of numbered lines. Press **A** on a line to edit it — the Steam on-screen keyboard opens on the text field — then **Apply**. The same panel can **insert a line below** or **delete** the line.
+* **Save** writes the file back in place, keeping its permissions.
 * UTF-8, UTF-16 and Latin-1 files are all read correctly, and saved back in the encoding — and with the byte-order mark — they came with.
 * Files that are not text, or larger than 1 MB, are refused rather than mangled.
 * Closing with unsaved changes asks before discarding them, and a file changed on disk while you were editing offers **Overwrite** or **Reload**.
