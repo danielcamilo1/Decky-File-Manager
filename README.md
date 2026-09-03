@@ -32,6 +32,7 @@ Manage your files and folders without leaving Gaming Mode. Browse directories, c
 * **Quick access to connected drives** — SD card, USB sticks and external drives.
 * **Built-in text editor** — read a file whole and edit it line by line with the SteamOS keyboard, without leaving Gaming Mode.
 * **Recent folders** — jump straight back to the last folders you visited.
+* **Browse a game's files from its own Steam menu** — installation folder or Proton compatdata, in one pick.
 * File and folder management.
 * Copy, move, rename, and delete operations.
 * Archive extraction (zip, tar and variants).
@@ -66,7 +67,7 @@ Text files open in an editor right inside the plugin, so a config tweak no longe
 * **Save** writes the file back in place, keeping its permissions.
 * UTF-8, UTF-16 and Latin-1 files are all read correctly, and saved back in the encoding — and with the byte-order mark — they came with.
 * Files that are not text, or larger than 1 MB, are refused rather than mangled.
-* Closing with unsaved changes asks before discarding them, and a file changed on disk while you were editing offers **Overwrite** or **Reload**.
+* Closing with unsaved changes asks first, on a screen of its own with the answer that keeps your work already selected — **Save and close**, **Discard** or **Keep editing** — rather than in a banner you would have to walk the D-pad back up the whole file to reach. A file changed on disk while you were editing asks the same way, offering **Overwrite** or **Reload**.
 * **New file** in the **Y** options menu creates an empty file to start from.
 
 ## Recent folders
@@ -77,6 +78,15 @@ The last folders you opened are remembered, so getting back to one is a couple o
 * The history is kept by the plugin's own interface, so it does not depend on anything else being in sync.
 * The history holds the last 12 folders, survives a plugin reload, and drops folders that no longer exist.
 * **Clear history** empties it.
+
+## Steam library shortcut
+
+A game's own context menu — the one the **Options** button opens on a game in the library — gains a **Browse local files** submenu:
+
+* **Installation folder** opens the game's folder under `steamapps/common`, on whichever drive it is installed to.
+* **Compatdata folder** opens its Proton prefix, where saves and configuration for Windows games live. It exists from the first time the game runs through Proton.
+
+Both open the full file manager straight at the folder, so a mod or a config file is a couple of presses from the game itself.
 
 ## Drives
 
@@ -112,7 +122,6 @@ Starring the repo, reporting a bug or suggesting a feature helps just as much �
 Decky File Manager was created to fill the gap of native file management in Gaming Mode, bringing the convenience of desktop file managers to a console-like environment without sacrificing usability or immersion.
 
 > **Beta Notice:** Decky File Manager is currently in beta. The plugin is fully functional, but new features, performance improvements, and interface refinements are actively being developed, including:
-> * Integration with "browse" button on game properties.
 > * Sudo operations.
 >   
 

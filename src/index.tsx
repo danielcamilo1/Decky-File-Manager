@@ -18,7 +18,11 @@ import {
   DialogButton,
 } from "@decky/ui";
 import { callable, definePlugin, routerHook } from "@decky/api";
-import { showContextMenu, Menu, MenuGroup, MenuItem, MenuSeparator } from "@decky/ui";
+import { showContextMenu, Menu, MenuItem, MenuSeparator } from "@decky/ui";
+import { SubMenu } from "./steamMenu";
+import { patchLibraryContextMenu } from "./libraryContextMenu";
+import { ROUTE, hasPendingBrowse, subscribeBrowse, takePendingBrowse } from "./gameFolders";
+import type { BrowseRequest } from "./gameFolders";
 
 const FOCUSABLE_SELECTOR = "button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1']):not([disabled])";
 
@@ -492,14 +496,6 @@ function recordRecentPath(path: string): string[] {
   return next;
 }
 
-/**
- * Steam's own submenu component, found by searching its bundle, so it can come
- * back undefined if Valve moves it. Rendering undefined would take the whole
- * menu down, so it is only used when it is there; the fallback opens a second
- * menu instead, which needs nothing but showContextMenu.
- */
-const SubMenu = MenuGroup as unknown as React.FC<{ label: string; children?: React.ReactNode }> | undefined;
-
 function recentEntriesFrom(paths: string[]): RecentEntry[] {
   return paths.map((entry) => ({
     path: entry,
@@ -953,6 +949,67 @@ const EditorLine = forwardRef<HTMLDivElement, {
 });
 
 /**
+ * A question the editor cannot carry on past: unsaved changes on the way out,
+ * or the file having changed on disk under an edit.
+ *
+ * It takes the editor over rather than sitting as a banner above the file.
+ * As a banner it was only reachable by walking the D-pad back up through every
+ * line of the document — the question is modal, so the screen is too, nothing
+ * else is focusable while it is up, and the answer that loses no work is
+ * focused as it appears.
+ */
+function EditorConfirm({
+  title,
+  message,
+  tone,
+  actions,
+}: {
+  title: string;
+  message: string;
+  tone: "danger" | "warning";
+  actions: Array<{ label: string; onSelect: () => void; primary?: boolean }>;
+}) {
+  const primaryRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    // A beat after the commit, the same as the page's other modals: Steam
+    // settles its own focus on the way in and focusing sooner loses to it.
+    const timer = window.setTimeout(() => {
+      try {
+        primaryRef.current?.focus();
+      } catch {
+      }
+    }, 50);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  const accent = tone === "danger" ? "rgba(220,80,80," : "rgba(230,170,60,";
+
+  return (
+    <div style={{ flex: 1, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: "12px 0" }}>
+      <div style={{ width: "100%", maxWidth: 560, padding: 16, borderRadius: 6, background: `${accent}0.12)`, border: `1px solid ${accent}0.45)` }}>
+        <h2 style={{ margin: "0 0 8px", fontSize: 17 }}>{title}</h2>
+        <div style={{ fontSize: 13, opacity: 0.8, marginBottom: 16 }}>{message}</div>
+        <Focusable
+          style={{ display: "flex", flexDirection: "column", gap: 8 }}
+          navEntryPreferPosition={NavEntryPositionPreferences.MAINTAIN_X}
+        >
+          {actions.map((action) => (
+            <DialogButton
+              key={action.label}
+              ref={(action.primary ? primaryRef : undefined) as any}
+              onClick={action.onSelect}
+            >
+              {action.label}
+            </DialogButton>
+          ))}
+        </Focusable>
+      </div>
+    </div>
+  );
+}
+
+/**
  * The file editor, rendered inline on the page in place of the file list.
  *
  * Not a modal on purpose. A dialog only joins Steam's gamepad navigation when
@@ -1012,7 +1069,7 @@ function EditorView({
   onInsertLine: (index: number) => void;
   onDeleteLine: (index: number) => void;
   onShowMore: () => void;
-  onSave: (force: boolean) => void;
+  onSave: (force: boolean, closeAfter?: boolean) => void;
   onReload: () => void;
   onKeepEditing: () => void;
   onDiscard: () => void;
@@ -1032,6 +1089,32 @@ function EditorView({
       // Older webviews without the options argument; not worth failing over.
     }
   }, [editingLine]);
+
+  // Answered on a screen of its own, below, rather than in a banner over the
+  // file. Unsaved changes win over a stale file: the way out is the question.
+  const confirm = discardPrompt
+    ? {
+        tone: "danger" as const,
+        title: t("editor.discard_title"),
+        message: t("editor.discard_message").replace("{name}", buffer.name),
+        actions: [
+          { label: t("editor.save_and_close"), onSelect: () => onSave(false, true), primary: true },
+          { label: t("editor.discard"), onSelect: onDiscard },
+          { label: t("editor.keep_editing"), onSelect: onKeepEditing },
+        ],
+      }
+    : stale
+      ? {
+          tone: "warning" as const,
+          title: t("editor.stale_title"),
+          message: t("editor.stale_message").replace("{name}", buffer.name),
+          actions: [
+            { label: t("editor.overwrite"), onSelect: () => onSave(true), primary: true },
+            { label: t("editor.reload"), onSelect: onReload },
+            { label: t("editor.keep_editing"), onSelect: onKeepEditing },
+          ],
+        }
+      : null;
 
   const status = buffer.readOnly
     ? t("editor.read_only")
@@ -1063,26 +1146,10 @@ function EditorView({
         </div>
       ) : null}
 
-      {stale ? (
-        <div style={{ margin: "0 0 8px", padding: "8px 10px", borderRadius: 4, fontSize: 12, background: "rgba(230,170,60,0.15)", border: "1px solid rgba(230,170,60,0.45)" }}>
-          <div style={{ marginBottom: 8 }}>{t("editor.stale_message").replace("{name}", buffer.name)}</div>
-          <Focusable style={{ display: "flex", gap: 8 }}>
-            <DialogButton style={{ flex: 1 }} onClick={() => onSave(true)}>{t("editor.overwrite")}</DialogButton>
-            <DialogButton style={{ flex: 1 }} onClick={onReload}>{t("editor.reload")}</DialogButton>
-          </Focusable>
-        </div>
-      ) : null}
-
-      {discardPrompt ? (
-        <div style={{ margin: "0 0 8px", padding: "8px 10px", borderRadius: 4, fontSize: 12, background: "rgba(220,80,80,0.12)", border: "1px solid rgba(220,80,80,0.4)" }}>
-          <div style={{ marginBottom: 8 }}>{t("editor.discard_message").replace("{name}", buffer.name)}</div>
-          <Focusable style={{ display: "flex", gap: 8 }}>
-            <DialogButton style={{ flex: 1 }} onClick={onKeepEditing}>{t("editor.keep_editing")}</DialogButton>
-            <DialogButton style={{ flex: 1 }} onClick={onDiscard}>{t("editor.discard")}</DialogButton>
-          </Focusable>
-        </div>
-      ) : null}
-
+      {confirm ? (
+        <EditorConfirm title={confirm.title} message={confirm.message} tone={confirm.tone} actions={confirm.actions} />
+      ) : (
+        <>
       <div style={{ fontSize: 11, opacity: 0.5, padding: "0 2px 6px" }}>
         {loading ? t("editor.loading") : editing ? t("editor.edit_hint") : t("editor.hint")}
       </div>
@@ -1161,6 +1228,8 @@ function EditorView({
             </DialogButton>
             <DialogButton style={{ flex: 1 }} onClick={onClose}>{t("action.close")}</DialogButton>
           </Focusable>
+        </>
+      )}
         </>
       )}
     </div>
@@ -1445,7 +1514,9 @@ function FileManagerPage() {
     if (initialLoadDone.current) return;
     initialLoadDone.current = true;
     const [first] = panesRef.current;
-    void first.loadPath(first.pathRef.current);
+    // A folder asked for from the Steam library menu is answered by the effect
+    // further down; loading the default folder as well would only flash it.
+    if (!hasPendingBrowse()) void first.loadPath(first.pathRef.current);
     void refreshDrives();
   }, [refreshDrives]);
 
@@ -1474,6 +1545,41 @@ function FileManagerPage() {
     pane.setError(null);
     void pane.loadPath(drive.path, t("error.directory_not_found"));
   }, []);
+
+  const getGameFolders = callable<[string], { install: string | null; compat: string | null; name: string | null }>("get_game_folders");
+
+  /**
+   * Open the panel at one of a game's folders, asked for from the Steam
+   * library context menu. The folders are resolved on the backend, off the
+   * app id alone; a game that has neither — never launched, so no Proton
+   * prefix — says so in the panel rather than silently doing nothing.
+   */
+  const openBrowseRequest = useCallback(async (request: BrowseRequest) => {
+    const pane = panesRef.current[activePaneIndexRef.current];
+    try {
+      const folders = await getGameFolders(request.appid);
+      const target = request.kind === "compat" ? folders.compat : folders.install;
+      if (target) {
+        await pane.loadPath(target, t("error.directory_not_found"), false, null);
+        return;
+      }
+      await pane.loadPath(pane.pathRef.current, undefined, false, null);
+      pane.setError(t(request.kind === "compat" ? "error.compatdata_not_found" : "error.install_folder_not_found"));
+    } catch (e) {
+      await pane.loadPath(pane.pathRef.current, undefined, false, null);
+      pane.setError(backendErrorMessage(e, "error.could_not_load_directory"));
+    }
+  }, []);
+
+  // Taken on mount for a menu pick that opened the page, and delivered live
+  // for one made while it was already open.
+  useEffect(() => {
+    const requested = takePendingBrowse();
+    if (requested) void openBrowseRequest(requested);
+    return subscribeBrowse((request) => {
+      void openBrowseRequest(request);
+    });
+  }, [openBrowseRequest]);
 
   const hasClipboard = callable<[], { has: boolean }>("has_clipboard");
   const copyPath = callable<[string], { ok: boolean }>("copy_path");
@@ -1574,6 +1680,8 @@ function FileManagerPage() {
   editingCaretRef.current = editingCaret;
   const editorDiscardPromptRef = useRef(false);
   editorDiscardPromptRef.current = editorDiscardPrompt;
+  const editorStaleRef = useRef(false);
+  editorStaleRef.current = editorStale;
   const editorSavingRef = useRef(false);
   editorOpenRef.current = editorBuffer !== null;
 
@@ -2217,7 +2325,7 @@ function FileManagerPage() {
     setEditorDiscardPrompt(false);
   }, []);
 
-  const saveEditor = useCallback((force: boolean) => {
+  const saveEditor = useCallback((force: boolean, closeAfter = false) => {
     void (async () => {
       const buffer = editorBufferRef.current;
       if (!buffer || editorSavingRef.current) return;
@@ -2247,6 +2355,7 @@ function FileManagerPage() {
         setEditorSaved(true);
         window.setTimeout(() => setEditorSaved(false), 2000);
         void refreshPanes();
+        if (closeAfter) closeEditor();
       } catch (e: any) {
         setEditorError(backendErrorMessage(e, "error.could_not_save_file"));
       } finally {
@@ -2254,7 +2363,7 @@ function FileManagerPage() {
         setEditorSaving(false);
       }
     })();
-  }, [refreshPanes]);
+  }, [closeEditor, refreshPanes]);
 
   const reloadEditor = useCallback(() => {
     const buffer = editorBufferRef.current;
@@ -2371,6 +2480,10 @@ function FileManagerPage() {
     }
     if (editorDiscardPromptRef.current) {
       setEditorDiscardPrompt(false);
+      return;
+    }
+    if (editorStaleRef.current) {
+      setEditorStale(false);
       return;
     }
     const buffer = editorBufferRef.current;
@@ -2836,7 +2949,7 @@ function FileManagerPage() {
                   onShowMore={() => setVisibleLines((count) => count + 150)}
                   onSave={saveEditor}
                   onReload={reloadEditor}
-                  onKeepEditing={() => setEditorDiscardPrompt(false)}
+                  onKeepEditing={() => { setEditorDiscardPrompt(false); setEditorStale(false); }}
                   onDiscard={closeEditor}
                   onClose={editorBack}
                 />
@@ -3498,7 +3611,7 @@ function FileManagerPage() {
 function Content() {
   const openFullScreen = useCallback(() => {
     Router.CloseSideMenus();
-    Router.Navigate?.("/decky-file-manager");
+    Router.Navigate?.(ROUTE);
   }, []);
 
   return (
@@ -3518,12 +3631,17 @@ function Content() {
   );
 }
 
-routerHook.addRoute("/decky-file-manager", FileManagerPage);
+routerHook.addRoute(ROUTE, FileManagerPage);
 
 export default definePlugin(() => {
+  const unpatchLibraryContextMenu = patchLibraryContextMenu();
+
   return {
     name: "Decky File Manager",
     content: <Content />,
     icon: <PluginIcon />,
+    onDismount() {
+      unpatchLibraryContextMenu();
+    },
   };
 });
