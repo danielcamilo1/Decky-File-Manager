@@ -11,6 +11,8 @@
   "label.view": "View",
   "option.list": "List",
   "option.grid": "Grid",
+  "option.on": "On",
+  "option.off": "Off",
   "panel.files": "FILES",
   "menu.options": "Options",
   "menu.copy": "Copy",

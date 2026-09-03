@@ -11,6 +11,8 @@
   "label.view": "Exibição",
   "option.list": "Lista",
   "option.grid": "Grade",
+  "option.on": "Ativado",
+  "option.off": "Desativado",
   "panel.files": "ARQUIVOS",
   "menu.options": "Opções",
   "menu.copy": "Copiar",

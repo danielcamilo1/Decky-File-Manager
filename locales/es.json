@@ -11,6 +11,8 @@
   "label.view": "Vista",
   "option.list": "Lista",
   "option.grid": "Cuadrícula",
+  "option.on": "Activado",
+  "option.off": "Desactivado",
   "panel.files": "ARCHIVOS",
   "menu.options": "Opciones",
   "menu.copy": "Copiar",
