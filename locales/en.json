@@ -125,7 +125,7 @@
   "recent.clear": "Clear history",
   "editor.error_binary": "This file is not text and cannot be edited.",
   "editor.error_too_large": "This file is too large to edit (limit 1 MB).",
-  "editor.hint": "Press A on a line to edit it. The keys below type without needing the Steam keyboard.",
+  "editor.hint": "Press A on a line to edit it. Save writes the file; B goes back.",
   "editor.edit_line": "Line {number}",
   "editor.apply": "Apply",
   "editor.line_empty": "(empty line)",
@@ -133,5 +133,9 @@
   "editor.delete_line": "Delete line",
   "recent.failed": "Could not load the folder history.",
   "editor.space": "Space",
-  "editor.clear_line": "Clear"
+  "editor.clear_line": "Clear",
+  "menu.recent_locations": "Recent Locations",
+  "editor.done": "Done",
+  "editor.position": "Ln {line}, Col {column}",
+  "editor.edit_hint": "Type with the keys below. ◀ ▶ (or L1/R1) move the cursor, ▲ ▼ change line, ↵ splits the line, B applies and goes back."
 }

@@ -18,7 +18,7 @@ import {
   DialogButton,
 } from "@decky/ui";
 import { callable, definePlugin, routerHook } from "@decky/api";
-import { showContextMenu, Menu, MenuItem, MenuSeparator } from "@decky/ui";
+import { showContextMenu, Menu, MenuGroup, MenuItem, MenuSeparator } from "@decky/ui";
 
 const FOCUSABLE_SELECTOR = "button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1']):not([disabled])";
 
@@ -492,6 +492,14 @@ function recordRecentPath(path: string): string[] {
   return next;
 }
 
+/**
+ * Steam's own submenu component, found by searching its bundle, so it can come
+ * back undefined if Valve moves it. Rendering undefined would take the whole
+ * menu down, so it is only used when it is there; the fallback opens a second
+ * menu instead, which needs nothing but showContextMenu.
+ */
+const SubMenu = MenuGroup as unknown as React.FC<{ label: string; children?: React.ReactNode }> | undefined;
+
 function recentEntriesFrom(paths: string[]): RecentEntry[] {
   return paths.map((entry) => ({
     path: entry,
@@ -916,13 +924,17 @@ function OnScreenKeyboard({
   onKey,
   onBackspace,
   onSpace,
-  onClear,
+  onEnter,
+  onCaret,
+  onLine,
   onDone,
 }: {
   onKey: (character: string) => void;
   onBackspace: () => void;
   onSpace: () => void;
-  onClear: () => void;
+  onEnter: () => void;
+  onCaret: (delta: number) => void;
+  onLine: (delta: number) => void;
   onDone: () => void;
 }) {
   const [mode, setMode] = useState<"lower" | "upper" | "symbols">("lower");
@@ -931,7 +943,7 @@ function OnScreenKeyboard({
   const keyStyle = {
     minWidth: 0,
     flex: "1 1 0%",
-    padding: "6px 0",
+    padding: "5px 0",
     fontSize: 14,
     fontFamily: "Consolas, 'Courier New', monospace",
   } as const;
@@ -955,10 +967,20 @@ function OnScreenKeyboard({
         <DialogButton style={keyStyle} onClick={() => setMode(mode === "symbols" ? "lower" : "symbols")}>
           {mode === "symbols" ? "abc" : "#+="}
         </DialogButton>
-        <DialogButton style={{ ...keyStyle, flex: "2 1 0%" }} onClick={onSpace}>{t("editor.space")}</DialogButton>
-        <DialogButton style={keyStyle} onClick={onBackspace}>{"\u232B"}</DialogButton>
-        <DialogButton style={keyStyle} onClick={onClear}>{t("editor.clear_line")}</DialogButton>
-        <DialogButton style={keyStyle} onClick={onDone}>{t("editor.apply")}</DialogButton>
+        <DialogButton style={{ ...keyStyle, flex: "3 1 0%" }} onClick={onSpace}>{t("editor.space")}</DialogButton>
+        <DialogButton style={keyStyle} onClick={onBackspace}>{"⌫"}</DialogButton>
+        {/* Splits the line at the cursor, the way Enter does in any editor. */}
+        <DialogButton style={keyStyle} onClick={onEnter}>{"↵"}</DialogButton>
+      </Focusable>
+
+      <Focusable style={{ display: "flex", gap: 4 }}>
+        <DialogButton style={keyStyle} onClick={() => onCaret(-1)}>{"◀"}</DialogButton>
+        <DialogButton style={keyStyle} onClick={() => onCaret(1)}>{"▶"}</DialogButton>
+        {/* Commit this line and carry on typing the one above/below, without
+            leaving the keyboard: the whole point of the redesign. */}
+        <DialogButton style={keyStyle} onClick={() => onLine(-1)}>{"▲"}</DialogButton>
+        <DialogButton style={keyStyle} onClick={() => onLine(1)}>{"▼"}</DialogButton>
+        <DialogButton style={{ ...keyStyle, flex: "2 1 0%" }} onClick={onDone}>{t("editor.done")}</DialogButton>
       </Focusable>
     </div>
   );
@@ -979,13 +1001,17 @@ type EditorBuffer = {
  *
  * Not a modal on purpose. A dialog only joins Steam's gamepad navigation
  * when its modal manager mounts it, and that could not be made to work here
- * — the editor was reachable by touch at best, and Steam never activated the
- * text field, which is what raises the on-screen keyboard. The page itself is
- * navigable and its path TextField does raise the keyboard, so the editor
- * lives there and uses the same components.
+ * — the editor was reachable by touch at best. The page itself is navigable,
+ * so the editor lives there and uses the same components as the file list.
  *
- * Editing is per line because TextField is Steam's own single-line component,
- * and it is the thing the keyboard is attached to.
+ * It has two modes, like a console text editor:
+ *
+ * - Reading: the whole file as a list of lines. A on a line starts editing it.
+ * - Typing: the lines around the one being edited stay on screen with a cursor
+ *   drawn in place, and the keyboard sits underneath. The keyboard never
+ *   disappears between lines — ▲/▼ commit the current line and move to the
+ *   next, ↵ splits a line, ◀/▶ (and L1/R1) move the cursor — so a run of edits
+ *   is one continuous session rather than one round trip per line.
  */
 function EditorView({
   buffer,
@@ -997,11 +1023,18 @@ function EditorView({
   discardPrompt,
   editingLine,
   editingValue,
+  editingCaret,
   visibleLines,
-  onEditingValue,
+  onEditingText,
   onStartLine,
+  onInsertText,
+  onBackspace,
+  onEnter,
+  onCaret,
+  onMoveLine,
   onApplyLine,
   onCancelLine,
+  onClearLine,
   onInsertLine,
   onDeleteLine,
   onShowMore,
@@ -1020,11 +1053,18 @@ function EditorView({
   discardPrompt: boolean;
   editingLine: number | null;
   editingValue: string;
+  editingCaret: number;
   visibleLines: number;
-  onEditingValue: (value: string) => void;
+  onEditingText: (value: string, caret: number) => void;
   onStartLine: (index: number) => void;
+  onInsertText: (text: string) => void;
+  onBackspace: () => void;
+  onEnter: () => void;
+  onCaret: (delta: number) => void;
+  onMoveLine: (delta: number) => void;
   onApplyLine: () => void;
   onCancelLine: () => void;
+  onClearLine: () => void;
   onInsertLine: (index: number) => void;
   onDeleteLine: (index: number) => void;
   onShowMore: () => void;
@@ -1036,6 +1076,7 @@ function EditorView({
 }) {
   const lines = useMemo(() => buffer.content.split("\n"), [buffer.content]);
   const dirty = buffer.content !== buffer.original;
+  const editing = editingLine !== null;
 
   const status = buffer.readOnly
     ? t("editor.read_only")
@@ -1047,11 +1088,28 @@ function EditorView({
           ? t("editor.saved")
           : buffer.encoding;
 
+  // The lines on either side of the one being typed, so the file stays legible
+  // while editing instead of being replaced by a lone text field.
+  const contextStart = editing ? Math.max(0, editingLine - 3) : 0;
+  const contextEnd = editing ? Math.min(lines.length, editingLine + 4) : 0;
+  const context: number[] = [];
+  for (let index = contextStart; index < contextEnd; index += 1) context.push(index);
+
+  const caret = Math.max(0, Math.min(editingCaret, editingValue.length));
+
+  const gutterStyle = { opacity: 0.35, minWidth: 34, textAlign: "right", flexShrink: 0 } as const;
+  const monospace = { fontFamily: "Consolas, 'Courier New', monospace", fontSize: 13 } as const;
+
   return (
     <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", minWidth: 0 }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 10, padding: "2px 0 8px", minWidth: 0 }}>
         <h1 style={{ margin: 0, fontSize: 20, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{buffer.name}</h1>
         <span style={{ fontSize: 12, opacity: 0.55, flexShrink: 0 }}>{status}</span>
+        <span style={{ fontSize: 12, opacity: 0.4, flexShrink: 0, marginLeft: "auto" }}>
+          {editing
+            ? t("editor.position").replace("{line}", String(editingLine + 1)).replace("{column}", String(caret + 1))
+            : t("editor.lines").replace("{count}", String(lines.length))}
+        </span>
       </div>
 
       {error ? (
@@ -1080,37 +1138,99 @@ function EditorView({
         </div>
       ) : null}
 
-      {editingLine !== null ? (
-        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", minWidth: 0 }}>
-          <div style={{ fontSize: 12, opacity: 0.6, padding: "0 2px 6px" }}>
-            {t("editor.edit_line").replace("{number}", String(editingLine + 1))}
+      {editing ? (
+        <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", minWidth: 0 }}>
+          <div
+            style={{
+              ...monospace,
+              padding: "6px 4px",
+              marginBottom: 6,
+              borderRadius: 4,
+              border: "1px solid rgba(255,255,255,0.12)",
+              background: "rgba(0,0,0,0.3)",
+              overflowY: "auto",
+              maxHeight: 190,
+              minWidth: 0,
+            }}
+          >
+            {context.map((index) => {
+              const current = index === editingLine;
+              const text = current ? editingValue : lines[index] ?? "";
+              return (
+                <div
+                  key={index}
+                  style={{
+                    display: "flex",
+                    gap: 10,
+                    minWidth: 0,
+                    padding: "1px 4px",
+                    borderRadius: 2,
+                    background: current ? "rgba(103,193,245,0.16)" : "transparent",
+                  }}
+                >
+                  <span style={gutterStyle}>{index + 1}</span>
+                  {current ? (
+                    <span style={{ minWidth: 0, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
+                      {text.slice(0, caret)}
+                      <span
+                        style={{
+                          display: "inline-block",
+                          width: 0,
+                          borderLeft: "2px solid #67c1f5",
+                          height: "1em",
+                          verticalAlign: "text-bottom",
+                        }}
+                      />
+                      {text.slice(caret)}
+                    </span>
+                  ) : (
+                    <span
+                      style={{
+                        minWidth: 0,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        opacity: text.length ? 0.6 : 0.25,
+                      }}
+                    >
+                      {text}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
           </div>
 
-          {/* Steam's field is kept for anyone whose keyboard does come up, and
-              for a hardware keyboard; the buttons below type without it. */}
-          <div data-line-input style={{ padding: "2px 0 8px", minWidth: 0 }}>
+          <div style={{ fontSize: 11, opacity: 0.5, padding: "0 2px 4px" }}>{t("editor.edit_hint")}</div>
+
+          {/* Steam's own field, kept for a hardware keyboard and for anyone
+              whose on-screen keyboard does come up; the keys below type
+              without it. */}
+          <div data-line-input style={{ padding: "0 0 4px", minWidth: 0 }}>
             <TextField
               value={editingValue}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => onEditingValue(e.currentTarget.value)}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                onEditingText(e.currentTarget.value, e.currentTarget.selectionStart ?? e.currentTarget.value.length)
+              }
               bShowCopyAction={false}
             />
           </div>
 
           <OnScreenKeyboard
-            onKey={(character) => onEditingValue(editingValue + character)}
-            onBackspace={() => onEditingValue(editingValue.slice(0, -1))}
-            onSpace={() => onEditingValue(editingValue + " ")}
-            onClear={() => onEditingValue("")}
+            onKey={onInsertText}
+            onBackspace={onBackspace}
+            onSpace={() => onInsertText(" ")}
+            onEnter={onEnter}
+            onCaret={onCaret}
+            onLine={onMoveLine}
             onDone={onApplyLine}
           />
 
-          <Focusable style={{ display: "flex", gap: 8 }}>
-            <DialogButton style={{ flex: 1 }} onClick={onApplyLine}>{t("editor.apply")}</DialogButton>
-            <DialogButton style={{ flex: 1 }} onClick={onCancelLine}>{t("action.cancel")}</DialogButton>
-          </Focusable>
-          <Focusable style={{ display: "flex", gap: 8, marginTop: 8 }}>
-            <DialogButton style={{ flex: 1 }} onClick={() => onInsertLine(editingLine)}>{t("editor.insert_line")}</DialogButton>
-            <DialogButton style={{ flex: 1 }} onClick={() => onDeleteLine(editingLine)}>{t("editor.delete_line")}</DialogButton>
+          <Focusable style={{ display: "flex", gap: 6, paddingTop: 6, paddingBottom: 8 }}>
+            <DialogButton style={{ flex: 1, fontSize: 13 }} onClick={() => onInsertLine(editingLine)}>{t("editor.insert_line")}</DialogButton>
+            <DialogButton style={{ flex: 1, fontSize: 13 }} onClick={() => onDeleteLine(editingLine)}>{t("editor.delete_line")}</DialogButton>
+            <DialogButton style={{ flex: 1, fontSize: 13 }} onClick={onClearLine}>{t("editor.clear_line")}</DialogButton>
+            <DialogButton style={{ flex: 1, fontSize: 13 }} onClick={onCancelLine}>{t("action.cancel")}</DialogButton>
           </Focusable>
         </div>
       ) : (
@@ -1124,8 +1244,8 @@ function EditorView({
                   <PanelSectionRow>
                     <Focusable onActivate={() => onStartLine(index)}>
                       <ButtonItem onClick={() => onStartLine(index)} layout="below">
-                        <div style={{ width: "100%", display: "flex", gap: 10, minWidth: 0, textAlign: "left", fontFamily: "Consolas, 'Courier New', monospace", fontSize: 13 }}>
-                          <span style={{ opacity: 0.35, minWidth: 34, textAlign: "right", flexShrink: 0 }}>{index + 1}</span>
+                        <div style={{ width: "100%", display: "flex", gap: 10, minWidth: 0, textAlign: "left", ...monospace }}>
+                          <span style={gutterStyle}>{index + 1}</span>
                           <span
                             style={{
                               minWidth: 0,
@@ -1154,24 +1274,23 @@ function EditorView({
               ) : null}
             </Focusable>
           </div>
+
+          <div style={{ fontSize: 11, opacity: 0.5, padding: "6px 2px", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", direction: "rtl", textAlign: "left" }}>
+            {buffer.path}
+          </div>
+
+          <Focusable style={{ display: "flex", gap: 8, paddingBottom: 8 }}>
+            <DialogButton
+              style={{ flex: 1 }}
+              disabled={buffer.readOnly || loading || saving || !dirty}
+              onClick={() => onSave(false)}
+            >
+              {saving ? t("editor.saving") : t("action.save")}
+            </DialogButton>
+            <DialogButton style={{ flex: 1 }} onClick={onClose}>{t("action.close")}</DialogButton>
+          </Focusable>
         </>
       )}
-
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, fontSize: 11, opacity: 0.5, padding: "6px 2px", minWidth: 0 }}>
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", direction: "rtl", textAlign: "left", minWidth: 0 }}>{buffer.path}</span>
-        <span style={{ flexShrink: 0 }}>{t("editor.lines").replace("{count}", String(lines.length))}</span>
-      </div>
-
-      <Focusable style={{ display: "flex", gap: 8, paddingBottom: 8 }}>
-        <DialogButton
-          style={{ flex: 1 }}
-          disabled={buffer.readOnly || loading || saving || editingLine !== null || !dirty}
-          onClick={() => onSave(false)}
-        >
-          {saving ? t("editor.saving") : t("action.save")}
-        </DialogButton>
-        <DialogButton style={{ flex: 1 }} onClick={onClose}>{t("action.close")}</DialogButton>
-      </Focusable>
     </div>
   );
 }
@@ -1391,6 +1510,7 @@ function FileManagerPage() {
   const toggleDualPaneRef = useRef<() => void>(() => null);
 
   const editorBackRef = useRef<() => void>(() => null);
+  const editorShoulderRef = useRef<(delta: number) => void>(() => null);
 
   const exitPlugin = useCallback(() => {
     Router.CloseSideMenus();
@@ -1566,6 +1686,9 @@ function FileManagerPage() {
   const [editorDiscardPrompt, setEditorDiscardPrompt] = useState(false);
   const [editingLine, setEditingLine] = useState<number | null>(null);
   const [editingValue, setEditingValue] = useState("");
+  // Where the next character goes. Typing used to only ever append, which made
+  // fixing anything but the end of a line a matter of deleting back to it.
+  const [editingCaret, setEditingCaret] = useState(0);
   const [visibleLines, setVisibleLines] = useState(150);
 
   // Read by the controller handler and the state updaters, which must not
@@ -1576,6 +1699,8 @@ function FileManagerPage() {
   editingLineRef.current = editingLine;
   const editingValueRef = useRef("");
   editingValueRef.current = editingValue;
+  const editingCaretRef = useRef(0);
+  editingCaretRef.current = editingCaret;
   const editorDiscardPromptRef = useRef(false);
   editorDiscardPromptRef.current = editorDiscardPrompt;
   const editorSavingRef = useRef(false);
@@ -1776,6 +1901,12 @@ function FileManagerPage() {
           }
 
           if ((gamepadButton === GAMEPAD_BUTTON_LSHOULDER || gamepadButton === GAMEPAD_BUTTON_RSHOULDER) && isPressed) {
+            // Nothing to switch between inside the editor, so they move the
+            // text cursor instead.
+            if (editorOpenRef.current && !hasActiveModalRef.current) {
+              editorShoulderRef.current(gamepadButton === GAMEPAD_BUTTON_LSHOULDER ? -1 : 1);
+              return;
+            }
             if (isShortcutBlocked()) return;
             leavePathInput();
 
@@ -2268,31 +2399,121 @@ function FileManagerPage() {
   const startEditLine = useCallback((index: number) => {
     const buffer = editorBufferRef.current;
     if (!buffer || buffer.readOnly) return;
+    const line = buffer.content.split("\n")[index] ?? "";
     setEditingLine(index);
-    setEditingValue(buffer.content.split("\n")[index] ?? "");
+    setEditingValue(line);
+    setEditingCaret(line.length);
+  }, []);
+
+  const setEditingText = useCallback((value: string, caret: number) => {
+    setEditingValue(value);
+    setEditingCaret(Math.max(0, Math.min(caret, value.length)));
+  }, []);
+
+  /**
+   * The line being typed, written back into the buffer.
+   *
+   * Returns the whole file so callers that need the result now — moving to
+   * another line, splitting one — can keep working from it instead of waiting
+   * for the state to come back around on the next render.
+   */
+  const commitEditingLine = useCallback((): string[] | null => {
+    const buffer = editorBufferRef.current;
+    const index = editingLineRef.current;
+    if (!buffer || index === null) return null;
+    const lines = buffer.content.split("\n");
+    lines[index] = editingValueRef.current;
+    setEditorBuffer({ ...buffer, content: lines.join("\n") });
+    return lines;
+  }, []);
+
+  const insertText = useCallback((text: string) => {
+    const value = editingValueRef.current;
+    const caret = Math.max(0, Math.min(editingCaretRef.current, value.length));
+    setEditingValue(value.slice(0, caret) + text + value.slice(caret));
+    setEditingCaret(caret + text.length);
+  }, []);
+
+  /** Deletes to the left of the cursor, joining onto the line above at column 1. */
+  const backspaceEditing = useCallback(() => {
+    const value = editingValueRef.current;
+    const caret = Math.max(0, Math.min(editingCaretRef.current, value.length));
+    if (caret > 0) {
+      setEditingValue(value.slice(0, caret - 1) + value.slice(caret));
+      setEditingCaret(caret - 1);
+      return;
+    }
+
+    const buffer = editorBufferRef.current;
+    const index = editingLineRef.current;
+    if (!buffer || buffer.readOnly || index === null || index === 0) return;
+    const lines = buffer.content.split("\n");
+    const previous = lines[index - 1] ?? "";
+    lines.splice(index - 1, 2, previous + value);
+    setEditorBuffer({ ...buffer, content: lines.join("\n") });
+    setEditingLine(index - 1);
+    setEditingValue(previous + value);
+    setEditingCaret(previous.length);
+  }, []);
+
+  const moveCaret = useCallback((delta: number) => {
+    const length = editingValueRef.current.length;
+    setEditingCaret(Math.max(0, Math.min(editingCaretRef.current + delta, length)));
+  }, []);
+
+  /** Commit this line, then carry on typing the one above or below it. */
+  const moveEditingLine = useCallback((delta: number) => {
+    const index = editingLineRef.current;
+    const lines = commitEditingLine();
+    if (!lines || index === null) return;
+
+    const target = index + delta;
+    if (target < 0 || target >= lines.length) return;
+
+    const line = lines[target] ?? "";
+    setEditingLine(target);
+    setEditingValue(line);
+    setEditingCaret(line.length);
+    setVisibleLines((count) => Math.max(count, target + 2));
+  }, [commitEditingLine]);
+
+  /** Enter: break the line at the cursor and continue on the new one. */
+  const splitEditingLine = useCallback(() => {
+    const buffer = editorBufferRef.current;
+    const index = editingLineRef.current;
+    if (!buffer || buffer.readOnly || index === null) return;
+
+    const value = editingValueRef.current;
+    const caret = Math.max(0, Math.min(editingCaretRef.current, value.length));
+    const head = value.slice(0, caret);
+    const tail = value.slice(caret);
+
+    const lines = buffer.content.split("\n");
+    lines.splice(index, 1, head, tail);
+    setEditorBuffer({ ...buffer, content: lines.join("\n") });
+    setEditingLine(index + 1);
+    setEditingValue(tail);
+    setEditingCaret(0);
+    setVisibleLines((count) => Math.max(count, index + 3));
   }, []);
 
   const applyLineEdit = useCallback(() => {
-    setEditorBuffer((prev) => {
-      if (!prev || editingLineRef.current === null) return prev;
-      const next = prev.content.split("\n");
-      next[editingLineRef.current] = editingValueRef.current;
-      return { ...prev, content: next.join("\n") };
-    });
+    commitEditingLine();
     setEditingLine(null);
-  }, []);
+  }, [commitEditingLine]);
 
   /** Add an empty line below and drop straight into typing it. */
   const insertLineAfter = useCallback((index: number) => {
-    setEditorBuffer((prev) => {
-      if (!prev || prev.readOnly) return prev;
-      const next = prev.content.split("\n");
-      next.splice(index + 1, 0, "");
-      return { ...prev, content: next.join("\n") };
-    });
+    const buffer = editorBufferRef.current;
+    if (!buffer || buffer.readOnly) return;
+    const lines = buffer.content.split("\n");
+    lines[index] = editingLineRef.current === index ? editingValueRef.current : lines[index] ?? "";
+    lines.splice(index + 1, 0, "");
+    setEditorBuffer({ ...buffer, content: lines.join("\n") });
     setEditingLine(index + 1);
     setEditingValue("");
-    setVisibleLines((count) => Math.max(count, index + 2));
+    setEditingCaret(0);
+    setVisibleLines((count) => Math.max(count, index + 3));
   }, []);
 
   const deleteLine = useCallback((index: number) => {
@@ -2307,10 +2528,14 @@ function FileManagerPage() {
     setEditingLine(null);
   }, []);
 
-  /** B steps back one layer at a time rather than throwing the file away. */
+  /**
+   * B steps back one layer at a time rather than throwing the file away, and
+   * keeps what was typed: the line is committed to the buffer, which still
+   * leaves the file on disk untouched until Save.
+   */
   const editorBack = useCallback(() => {
     if (editingLineRef.current !== null) {
-      setEditingLine(null);
+      applyLineEdit();
       return;
     }
     if (editorDiscardPromptRef.current) {
@@ -2323,9 +2548,18 @@ function FileManagerPage() {
       return;
     }
     closeEditor();
-  }, [closeEditor]);
+  }, [applyLineEdit, closeEditor]);
 
   editorBackRef.current = editorBack;
+
+  // The shoulder buttons do nothing else while the editor is open, so they
+  // drive the cursor: the most-wanted key without moving off the letter keys.
+  const editorShoulder = useCallback((delta: number) => {
+    if (editingLineRef.current === null) return;
+    moveCaret(delta);
+  }, [moveCaret]);
+
+  editorShoulderRef.current = editorShoulder;
 
   const handleConflictChoice = useCallback(async (strategy: string, applyToAll = false) => {
     if (!conflictModal) return;
@@ -2382,6 +2616,56 @@ function FileManagerPage() {
         saveRecentPaths([]);
         setRecentPaths([]);
       };
+
+      // One entry that opens the history, rather than a dozen loose entries
+      // pushed to the bottom of the menu.
+      const recentItems = recentPaths.map((entry) => {
+        const go = () => goToRecent(entry);
+        return (
+          <MenuItem key={`recent-${entry.path}`} onClick={go} onSelected={go}>
+            <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <HistoryIcon />
+              <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", minWidth: 0 }}>
+                <span>{entry.name}</span>
+                <span style={{ fontSize: 11, opacity: 0.55 }}>{shortPath(entry.path, 2)}</span>
+              </span>
+            </span>
+          </MenuItem>
+        );
+      });
+
+      const recentClearItem = (
+        <MenuItem key="recent-clear" onClick={clearRecent} onSelected={clearRecent}>
+          <span style={{ display: "flex", alignItems: "center", gap: 10 }}><HistoryIcon />{t("recent.clear")}</span>
+        </MenuItem>
+      );
+
+      const openRecentSubmenu = () => {
+        // Picking a MenuItem closes its menu; let that finish before the
+        // history goes up in its place.
+        window.setTimeout(() => {
+          contextMenuInstance.current = showContextMenu(
+            <Menu label={t("menu.recent_locations")}>
+              {recentItems}
+              <MenuSeparator />
+              {recentClearItem}
+            </Menu>,
+            anchor,
+          );
+        }, 0);
+      };
+
+      const recentLocations = !recentPaths.length ? null : SubMenu ? (
+        <SubMenu key="recent-locations" label={t("menu.recent_locations")}>
+          {recentItems}
+          <MenuSeparator />
+          {recentClearItem}
+        </SubMenu>
+      ) : (
+        <MenuItem key="recent-locations" onClick={openRecentSubmenu} onSelected={openRecentSubmenu}>
+          <span style={{ display: "flex", alignItems: "center", gap: 10 }}><HistoryIcon />{t("menu.recent_locations")}</span>
+        </MenuItem>
+      );
       const exitApp = () => {
         // Same teardown caveat as toggleSplit: close the menu first, navigate
         // away on the next tick.
@@ -2520,6 +2804,8 @@ function FileManagerPage() {
               <span style={{ display: "flex", alignItems: "center", gap: 10 }}><SplitViewIcon />{splitOn ? t("menu.split_view_close") : t("menu.split_view")}</span>
             </MenuItem>
 
+            {recentLocations}
+
             <MenuSeparator />
 
             <MenuItem onClick={rename} onSelected={rename}>
@@ -2533,32 +2819,6 @@ function FileManagerPage() {
             <MenuItem onClick={properties} onSelected={properties}>
               <span style={{ display: "flex", alignItems: "center", gap: 10 }}><PropertiesIcon />{t("menu.properties")}</span>
             </MenuItem>
-
-            <MenuSeparator />
-
-            {recentPaths.length ? <MenuSeparator /> : null}
-            {recentPaths.slice(0, 6).map((entry) => {
-              const go = () => goToRecent(entry);
-              return (
-                <MenuItem key={`recent-${entry.path}`} onClick={go} onSelected={go}>
-                  <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <HistoryIcon />
-                    <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", minWidth: 0 }}>
-                      <span>{entry.name}</span>
-                      <span style={{ fontSize: 11, opacity: 0.55 }}>{shortPath(entry.path, 2)}</span>
-                    </span>
-                  </span>
-                </MenuItem>
-              );
-            })}
-            {recentPaths.length ? (
-              <MenuItem
-                onClick={clearRecent}
-                onSelected={clearRecent}
-              >
-                <span style={{ display: "flex", alignItems: "center", gap: 10 }}><HistoryIcon />{t("recent.clear")}</span>
-              </MenuItem>
-            ) : null}
 
             <MenuSeparator />
 
@@ -2581,6 +2841,7 @@ function FileManagerPage() {
             <MenuItem onClick={toggleSplit} onSelected={toggleSplit}>
               <span style={{ display: "flex", alignItems: "center", gap: 10 }}><SplitViewIcon />{splitOn ? t("menu.split_view_close") : t("menu.split_view")}</span>
             </MenuItem>
+            {recentLocations}
             {drives.length ? <MenuSeparator /> : null}
             {drives.map((drive) => {
               const go = () => goToDrive(drive);
@@ -2590,38 +2851,7 @@ function FileManagerPage() {
                 </MenuItem>
               );
             })}
-            {recentPaths.length ? (
-              <MenuItem
-                onClick={clearRecent}
-                onSelected={clearRecent}
-              >
-                <span style={{ display: "flex", alignItems: "center", gap: 10 }}><HistoryIcon />{t("recent.clear")}</span>
-              </MenuItem>
-            ) : null}
             <MenuSeparator />
-            {recentPaths.length ? <MenuSeparator /> : null}
-            {recentPaths.slice(0, 6).map((entry) => {
-              const go = () => goToRecent(entry);
-              return (
-                <MenuItem key={`recent-${entry.path}`} onClick={go} onSelected={go}>
-                  <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <HistoryIcon />
-                    <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", minWidth: 0 }}>
-                      <span>{entry.name}</span>
-                      <span style={{ fontSize: 11, opacity: 0.55 }}>{shortPath(entry.path, 2)}</span>
-                    </span>
-                  </span>
-                </MenuItem>
-              );
-            })}
-            {recentPaths.length ? (
-              <MenuItem
-                onClick={clearRecent}
-                onSelected={clearRecent}
-              >
-                <span style={{ display: "flex", alignItems: "center", gap: 10 }}><HistoryIcon />{t("recent.clear")}</span>
-              </MenuItem>
-            ) : null}
             <MenuItem onClick={exitApp} onSelected={exitApp}>
               <span style={{ display: "flex", alignItems: "center", gap: 10 }}><ExitIcon />{t("menu.exit")}</span>
             </MenuItem>
@@ -2771,11 +3001,18 @@ function FileManagerPage() {
                   discardPrompt={editorDiscardPrompt}
                   editingLine={editingLine}
                   editingValue={editingValue}
+                  editingCaret={editingCaret}
                   visibleLines={visibleLines}
-                  onEditingValue={setEditingValue}
+                  onEditingText={setEditingText}
                   onStartLine={startEditLine}
+                  onInsertText={insertText}
+                  onBackspace={backspaceEditing}
+                  onEnter={splitEditingLine}
+                  onCaret={moveCaret}
+                  onMoveLine={moveEditingLine}
                   onApplyLine={applyLineEdit}
                   onCancelLine={() => setEditingLine(null)}
+                  onClearLine={() => setEditingText("", 0)}
                   onInsertLine={insertLineAfter}
                   onDeleteLine={deleteLine}
                   onShowMore={() => setVisibleLines((count) => count + 150)}

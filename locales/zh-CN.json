@@ -125,7 +125,7 @@
   "recent.clear": "清除历史记录",
   "editor.error_binary": "此文件不是文本，无法编辑。",
   "editor.error_too_large": "此文件过大，无法编辑（上限 1 MB）。",
-  "editor.hint": "在某一行上按 A 进行编辑。下方的按键无需 Steam 键盘即可输入。",
+  "editor.hint": "在某一行按 A 键编辑该行。保存会写入文件；B 键返回。",
   "editor.edit_line": "第 {number} 行",
   "editor.apply": "应用",
   "editor.line_empty": "（空行）",
@@ -133,5 +133,9 @@
   "editor.delete_line": "删除行",
   "recent.failed": "无法加载文件夹历史记录。",
   "editor.space": "空格",
-  "editor.clear_line": "清除"
+  "editor.clear_line": "清除",
+  "menu.recent_locations": "最近位置",
+  "editor.done": "完成",
+  "editor.position": "第 {line} 行，第 {column} 列",
+  "editor.edit_hint": "使用下方按键输入。◀ ▶（或 L1/R1）移动光标，▲ ▼ 切换行，↵ 在光标处换行，B 应用并返回。"
 }

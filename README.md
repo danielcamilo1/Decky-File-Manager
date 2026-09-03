@@ -57,9 +57,18 @@ Text files open in an editor right inside the plugin, so a config tweak no longe
 
 * Press **A** on a text file to open it, or pick **Edit file** from the **Y** options menu for any file.
 * The editor opens in place of the file list, so it is navigable with the D-pad like the rest of the plugin.
-* The file is shown as a list of numbered lines. Press **A** on a line to edit it, then **Apply**. The same panel can **insert a line below** or **delete** the line.
-* **The editor carries its own on-screen keyboard** — a grid of keys driven with the D-pad and **A**, with letters, numbers and symbols. It does not rely on the Steam keyboard appearing.
-* Everything is reachable with the D-pad; **B** backs out of the line you are typing before it backs out of the file.
+
+It has two modes, like a console text editor:
+
+* **Reading** — the whole file as a list of numbered lines. Press **A** on a line to start typing it.
+* **Typing** — the lines around the one you are editing stay on screen with a cursor drawn in place, and the keyboard sits underneath.
+
+* **The editor carries its own on-screen keyboard** — a grid of keys driven with the D-pad and **A**, with letters, capitals, numbers and symbols. It does not rely on the Steam keyboard appearing.
+* **The keyboard stays put between lines.** **▲** and **▼** commit the line you are on and carry straight on typing the one above or below it, so a run of edits is one session rather than one round trip per line.
+* **◀** and **▶** — or **L1** and **R1**, without leaving the letter keys — move the cursor, so text can be fixed anywhere in a line rather than only at its end.
+* **↵** splits the line at the cursor, and backspace at the start of a line joins it onto the one above, the way any editor behaves.
+* **Insert line**, **Delete line** and **Clear** sit under the keyboard, along with **Cancel** to drop the line you are typing.
+* **B** applies the line and returns to reading, so nothing typed is lost; the file on disk is untouched until **Save**.
 * **Save** writes the file back in place, keeping its permissions.
 * UTF-8, UTF-16 and Latin-1 files are all read correctly, and saved back in the encoding — and with the byte-order mark — they came with.
 * Files that are not text, or larger than 1 MB, are refused rather than mangled.
@@ -70,7 +79,7 @@ Text files open in an editor right inside the plugin, so a config tweak no longe
 
 The last folders you opened are remembered, so getting back to one is a couple of presses rather than a walk down the tree.
 
-* The **Y** options menu lists them directly, most recent first — the same place the drive shortcuts live.
+* The **Y** options menu has a **Recent Locations** entry, next to the drive shortcuts, listing them most recent first.
 * The history is kept by the plugin's own interface, so it does not depend on anything else being in sync.
 * The history holds the last 12 folders, survives a plugin reload, and drops folders that no longer exist.
 * **Clear history** empties it.
@@ -89,7 +98,7 @@ Only drives worth navigating to are listed — SD cards, USB storage, external a
 | **B** | Tap to go up one directory; **hold** for a moment to leave the plugin from any depth (a progress bar shows the hold) |
 | **X** | Toggle split view |
 | **Y** | Options menu |
-| **L1** / **R1** | Switch to the left / right panel |
+| **L1** / **R1** | Switch to the left / right panel; move the cursor while typing in the editor |
 | **D-pad** | Navigate, and move between panels |
 
 The **Y** options menu also has an **Exit file manager** entry, if you would rather not hold a button.
