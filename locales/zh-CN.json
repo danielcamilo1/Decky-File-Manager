@@ -11,6 +11,8 @@
   "label.view": "视图",
   "option.list": "列表",
   "option.grid": "网格",
+  "option.on": "开",
+  "option.off": "关",
   "panel.files": "文件",
   "menu.options": "选项",
   "menu.copy": "复制",

@@ -11,8 +11,6 @@ import {
   PanelSectionRow,
   Router,
   TextField,
-  ToggleField,
-  DropdownItem,
   ModalRoot,
   DialogBody,
   DialogButton,
@@ -849,6 +847,94 @@ function GridTile({
         }}
       >
         {item.name}
+      </span>
+    </Focusable>
+  );
+}
+
+/**
+ * One control in the browsing toolbar.
+ *
+ * The panel's own ToggleField and DropdownItem were never meant to sit side by
+ * side: each lays its label out on the row it is given, so five of them across
+ * the top came out at two different heights, and the dropdowns were left too
+ * narrow to read the option that was actually selected. This stacks the label
+ * above the value instead — every control the same size, and the value on a
+ * line of its own, where it fits.
+ *
+ * Activating cycles to the next option rather than opening a menu. With two or
+ * three options each that is fewer presses than a dropdown, and the chosen
+ * value stays on screen instead of hiding behind a popup.
+ */
+function ToolbarControl({
+  label,
+  value,
+  active,
+  onActivate,
+}: {
+  label: string;
+  value: string;
+  /** A setting that is currently changing what the list shows, tinted so a
+   * glance across the row finds it. */
+  active?: boolean;
+  onActivate: () => void;
+}) {
+  const [focused, setFocused] = useState(false);
+
+  return (
+    <Focusable
+      onActivate={onActivate}
+      onClick={onActivate}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
+      style={{
+        flex: "1 1 0%",
+        minWidth: 0,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "flex-start",
+        justifyContent: "center",
+        gap: 2,
+        padding: "5px 10px",
+        borderRadius: 4,
+        boxSizing: "border-box",
+        cursor: "pointer",
+        background: focused
+          ? "rgba(120,180,255,0.28)"
+          : active
+            ? "rgba(120,180,255,0.10)"
+            : "rgba(255,255,255,0.05)",
+        border: `1px solid ${focused ? "rgba(120,180,255,0.9)" : active ? "rgba(120,180,255,0.35)" : "rgba(255,255,255,0.08)"}`,
+        transition: "background 0.1s linear, border-color 0.1s linear",
+      }}
+    >
+      <span
+        style={{
+          maxWidth: "100%",
+          fontSize: 10,
+          lineHeight: "12px",
+          letterSpacing: "0.08em",
+          textTransform: "uppercase",
+          opacity: focused ? 0.9 : 0.55,
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+        }}
+      >
+        {label}
+      </span>
+      <span
+        style={{
+          maxWidth: "100%",
+          fontSize: 13,
+          lineHeight: "17px",
+          fontWeight: 600,
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+        }}
+      >
+        {value}
       </span>
     </Focusable>
   );
@@ -3218,69 +3304,51 @@ function FileManagerPage() {
                 </div>
               </div>
 
-              <div style={{ width: "100%", padding: "8px 0", boxSizing: "border-box", minWidth: 0 }}>
+              <div style={{ width: "100%", padding: "6px 0", boxSizing: "border-box", minWidth: 0 }}>
                 <Focusable
                   navEntryPreferPosition={NavEntryPositionPreferences.MAINTAIN_X}
-                  style={{ display: "flex", gap: "12px", width: "100%", padding: "0" }}
+                  style={{ display: "flex", alignItems: "stretch", gap: 8, width: "100%" }}
                 >
-                  <div style={{ flex: "1 1 0%", minWidth: 0, display: "flex", alignItems: "center", justifyContent: "flex-start", padding: "0" }}>
-                    <div style={{ width: "100%", minWidth: 0 }}>
-                      <ToggleField
-                        label={t("label.hidden")}
-                        checked={showHidden}
-                        onChange={(v: boolean) => setShowHidden(v)}
-                      />
-                    </div>
-                  </div>
-                  <div style={{ flex: "1 1 0%", minWidth: 0, display: "flex", alignItems: "center", justifyContent: "flex-start", padding: "0" }}>
-                    <div style={{ width: "100%", minWidth: 0 }}>
-                      <ToggleField
-                        label={t("label.split_view")}
-                        checked={dualPane}
-                        onChange={(v: boolean) => setDualPane(v)}
-                      />
-                    </div>
-                  </div>
-                  <div style={{ flex: "1 1 0%", minWidth: 0, display: "flex", alignItems: "center", justifyContent: "flex-start", padding: "0" }}>
-                    <div style={{ width: "100%", minWidth: 0 }}>
-                      <DropdownItem
-                        label={t("label.order")}
-                        rgOptions={[
-                          { label: t("option.az"), data: "asc" },
-                          { label: t("option.za"), data: "desc" },
-                        ]}
-                        selectedOption={sortOrder}
-                        onChange={(option) => setSortOrder(option.data as "asc" | "desc")}
-                      />
-                    </div>
-                  </div>
-                  <div style={{ flex: "1 1 0%", minWidth: 0, display: "flex", alignItems: "center", justifyContent: "flex-start", padding: "0" }}>
-                    <div style={{ width: "100%", minWidth: 0 }}>
-                      <DropdownItem
-                        label={t("label.type")}
-                        rgOptions={[
-                          { label: t("option.all"), data: "all" },
-                          { label: t("option.folders"), data: "folders" },
-                          { label: t("option.files"), data: "files" },
-                        ]}
-                        selectedOption={fileTypeFilter}
-                        onChange={(option) => setFileTypeFilter(option.data as string)}
-                      />
-                    </div>
-                  </div>
-                  <div style={{ flex: "1 1 0%", minWidth: 0, display: "flex", alignItems: "center", justifyContent: "flex-start", padding: "0" }}>
-                    <div style={{ width: "100%", minWidth: 0 }}>
-                      <DropdownItem
-                        label={t("label.view")}
-                        rgOptions={[
-                          { label: t("option.list"), data: "list" },
-                          { label: t("option.grid"), data: "grid" },
-                        ]}
-                        selectedOption={viewMode}
-                        onChange={(option) => setViewMode(option.data as ViewMode)}
-                      />
-                    </div>
-                  </div>
+                  <ToolbarControl
+                    label={t("label.hidden")}
+                    value={showHidden ? t("option.on") : t("option.off")}
+                    active={showHidden}
+                    onActivate={() => setShowHidden(!showHidden)}
+                  />
+                  <ToolbarControl
+                    label={t("label.split_view")}
+                    value={dualPane ? t("option.on") : t("option.off")}
+                    active={dualPane}
+                    onActivate={() => setDualPane(!dualPane)}
+                  />
+                  <ToolbarControl
+                    label={t("label.order")}
+                    value={sortOrder === "asc" ? t("option.az") : t("option.za")}
+                    active={sortOrder !== "asc"}
+                    onActivate={() => setSortOrder(sortOrder === "asc" ? "desc" : "asc")}
+                  />
+                  <ToolbarControl
+                    label={t("label.type")}
+                    value={
+                      fileTypeFilter === "folders"
+                        ? t("option.folders")
+                        : fileTypeFilter === "files"
+                          ? t("option.files")
+                          : t("option.all")
+                    }
+                    active={fileTypeFilter !== "all"}
+                    onActivate={() =>
+                      setFileTypeFilter(
+                        fileTypeFilter === "all" ? "folders" : fileTypeFilter === "folders" ? "files" : "all",
+                      )
+                    }
+                  />
+                  <ToolbarControl
+                    label={t("label.view")}
+                    value={viewMode === "grid" ? t("option.grid") : t("option.list")}
+                    active={viewMode === "grid"}
+                    onActivate={() => setViewMode(viewMode === "grid" ? "list" : "grid")}
+                  />
                 </Focusable>
               </div>
 

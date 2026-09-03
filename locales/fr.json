@@ -11,6 +11,8 @@
   "label.view": "Affichage",
   "option.list": "Liste",
   "option.grid": "Grille",
+  "option.on": "Activé",
+  "option.off": "Désactivé",
   "panel.files": "FICHIERS",
   "menu.options": "Options",
   "menu.copy": "Copier",

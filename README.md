@@ -50,6 +50,8 @@ The file list can be read two ways, and the choice sticks:
 * **Grid** lays the folder out as tiles, so a folder of many short names fits on one screen instead of several. The D-pad moves between tiles in every direction, the tile under the cursor is filled and raised so there is no hunting for the selection on a TV, and it drops its name clamp so a long filename can still be read in full.
 * Both panels of the split view share the view, and the tiles shrink to suit.
 
+The row above the list holds the five browsing settings — **Hidden**, **Split**, **Order**, **Type** and **View** — each one an equally sized control with its label above the value it is currently set to, so what is selected can be read at a glance from across the room. Pressing **A** on one steps to its next value in place; none of them opens a menu over the file list.
+
 **Hidden files**, **order**, **type filter**, **view** and the **split** itself are remembered, so the plugin opens the way you left it rather than back at the defaults every time.
 
 Opening a folder — or turning hidden files on — always puts you back at the top of the list, instead of leaving the first entries above the fold.

@@ -11,6 +11,8 @@
   "label.view": "Ansicht",
   "option.list": "Liste",
   "option.grid": "Raster",
+  "option.on": "Ein",
+  "option.off": "Aus",
   "panel.files": "DATEIEN",
   "menu.options": "Optionen",
   "menu.copy": "Kopieren",
