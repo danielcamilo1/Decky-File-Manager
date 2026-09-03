@@ -1,4 +1,4 @@
-import { ReactNode, forwardRef, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ReactNode, forwardRef, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { t, loadRemoteTranslations, getLocale } from "./i18n";
 import pluginInfo from "../plugin.json";
 import packageInfo from "../package.json";
@@ -176,34 +176,34 @@ function ModalFocusScope({ children }: { children: ReactNode }) {
   );
 }
 
-function BaseIcon({ children }: { children: ReactNode }) {
+function BaseIcon({ children, size = 16 }: { children: ReactNode; size?: number }) {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" style={{ flexShrink: 0 }}>
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" style={{ flexShrink: 0 }}>
       {children}
     </svg>
   );
 }
 
-function FolderIcon() {
+function FolderIcon({ size }: { size?: number }) {
   return (
-    <BaseIcon>
+    <BaseIcon size={size}>
       <path d="M19.5 21a3 3 0 0 0 3-3v-4.5a3 3 0 0 0-3-3h-15a3 3 0 0 0-3 3V18a3 3 0 0 0 3 3h15ZM1.5 10.146V6a3 3 0 0 1 3-3h5.379a2.25 2.25 0 0 1 1.59.659l2.122 2.121c.14.141.331.22.53.22H19.5a3 3 0 0 1 3 3v1.146A4.483 4.483 0 0 0 19.5 9h-15a4.483 4.483 0 0 0-3 1.146Z" />
     </BaseIcon>
   );
 }
 
-function DocumentIcon() {
+function DocumentIcon({ size }: { size?: number }) {
   return (
-    <BaseIcon>
+    <BaseIcon size={size}>
       <path d="M5.625 1.5c-1.036 0-1.875.84-1.875 1.875v17.25c0 1.035.84 1.875 1.875 1.875h12.75c1.035 0 1.875-.84 1.875-1.875V12.75A3.75 3.75 0 0 0 16.5 9h-1.875a1.875 1.875 0 0 1-1.875-1.875V5.25A3.75 3.75 0 0 0 9 1.5H5.625Z" />
       <path d="M12.971 1.816A5.23 5.23 0 0 1 14.25 5.25v1.875c0 .207.168.375.375.375H16.5a5.23 5.23 0 0 1 3.434 1.279 9.768 9.768 0 0 0-6.963-6.963Z" />
     </BaseIcon>
   );
 }
 
-function ArchiveIcon() {
+function ArchiveIcon({ size }: { size?: number }) {
   return (
-    <BaseIcon>
+    <BaseIcon size={size}>
       <path d="M3.375 3C2.339 3 1.5 3.84 1.5 4.875v.75c0 1.036.84 1.875 1.875 1.875h17.25c1.035 0 1.875-.84 1.875-1.875v-.75C22.5 3.839 21.66 3 20.625 3H3.375Z" />
       <path fillRule="evenodd" d="m3.087 9 .54 9.176A3 3 0 0 0 6.62 21h10.757a3 3 0 0 0 2.995-2.824L20.913 9H3.087Zm6.163 3.75A.75.75 0 0 1 10 12h4a.75.75 0 0 1 0 1.5h-4a.75.75 0 0 1-.75-.75Z" clipRule="evenodd" />
     </BaseIcon>
@@ -490,6 +490,65 @@ function saveRecentPaths(paths: string[]): void {
   }
 }
 
+/**
+ * The browsing settings outlive the session.
+ *
+ * They live next to the recent folders, in the browser's own store rather than
+ * over RPC: the toolbar has to render with the remembered values on the very
+ * first frame, and a round trip to the backend would show the defaults first
+ * and then visibly correct itself.
+ */
+const PREFERENCES_STORAGE_KEY = "decky-file-manager:preferences";
+
+type ViewMode = "list" | "grid";
+
+type Preferences = {
+  showHidden: boolean;
+  sortOrder: string;
+  fileTypeFilter: string;
+  viewMode: ViewMode;
+  dualPane: boolean;
+};
+
+const DEFAULT_PREFERENCES: Preferences = {
+  showHidden: false,
+  sortOrder: "asc",
+  fileTypeFilter: "all",
+  viewMode: "list",
+  dualPane: false,
+};
+
+/** Every field is checked on the way in: a stale or hand-edited store is not
+ * allowed to put the panel into a state the toolbar cannot show. */
+function loadPreferences(): Preferences {
+  try {
+    const raw = window.localStorage.getItem(PREFERENCES_STORAGE_KEY);
+    if (!raw) return { ...DEFAULT_PREFERENCES };
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return { ...DEFAULT_PREFERENCES };
+    const stored = parsed as Partial<Preferences>;
+    return {
+      showHidden: typeof stored.showHidden === "boolean" ? stored.showHidden : DEFAULT_PREFERENCES.showHidden,
+      sortOrder: stored.sortOrder === "desc" ? "desc" : "asc",
+      fileTypeFilter:
+        stored.fileTypeFilter === "folders" || stored.fileTypeFilter === "files" ? stored.fileTypeFilter : "all",
+      viewMode: stored.viewMode === "grid" ? "grid" : "list",
+      dualPane: typeof stored.dualPane === "boolean" ? stored.dualPane : DEFAULT_PREFERENCES.dualPane,
+    };
+  } catch {
+    return { ...DEFAULT_PREFERENCES };
+  }
+}
+
+function savePreferences(preferences: Preferences): void {
+  try {
+    window.localStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify(preferences));
+  } catch {
+    // As with the recent list: a full or unavailable store is not worth
+    // breaking browsing over.
+  }
+}
+
 function recordRecentPath(path: string): string[] {
   const next = [path, ...loadRecentPaths().filter((entry) => entry !== path)].slice(0, RECENT_LIMIT);
   saveRecentPaths(next);
@@ -713,6 +772,88 @@ function DrivesBar({ drives, currentPath, onSelect }: { drives: DriveEntry[]; cu
   );
 }
 
+/**
+ * One entry in the grid view.
+ *
+ * A bare Focusable rather than a ButtonItem: a panel row is full width by
+ * construction and cannot be tiled. Drawing focus is therefore this
+ * component's own job, which is also what the grid needs to be usable from
+ * the couch — the cursor has to be a filled, slightly raised tile rather than
+ * a hairline outline, since a grid gives no other clue about where it sits.
+ * The focused tile also drops its name clamp, so a long filename can be read
+ * without opening anything.
+ */
+function GridTile({
+  item,
+  dual,
+  onOpen,
+  onFocus,
+}: {
+  item: FileEntry;
+  dual: boolean;
+  onOpen: () => void;
+  onFocus: () => void;
+}) {
+  const [focused, setFocused] = useState(false);
+  const iconSize = dual ? 28 : 34;
+
+  return (
+    <Focusable
+      onActivate={onOpen}
+      onClick={onOpen}
+      onFocus={() => {
+        setFocused(true);
+        onFocus();
+      }}
+      onBlur={() => setFocused(false)}
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "flex-start",
+        gap: 8,
+        height: "100%",
+        padding: "12px 6px 10px",
+        boxSizing: "border-box",
+        borderRadius: 6,
+        minWidth: 0,
+        cursor: "pointer",
+        background: focused ? "rgba(120,180,255,0.25)" : "rgba(255,255,255,0.04)",
+        border: `1px solid ${focused ? "rgba(120,180,255,0.9)" : "rgba(255,255,255,0.06)"}`,
+        boxShadow: focused ? "0 0 0 1px rgba(120,180,255,0.4)" : "none",
+        transform: focused ? "scale(1.05)" : "none",
+        transition: "transform 0.1s linear, background 0.1s linear, border-color 0.1s linear",
+      }}
+    >
+      <div style={{ opacity: item.is_dir ? 0.95 : 0.7, display: "flex" }}>
+        {item.is_dir ? (
+          <FolderIcon size={iconSize} />
+        ) : isArchiveFile(item.name) ? (
+          <ArchiveIcon size={iconSize} />
+        ) : (
+          <DocumentIcon size={iconSize} />
+        )}
+      </div>
+      <span
+        style={{
+          width: "100%",
+          fontSize: dual ? 11 : 12,
+          lineHeight: "14px",
+          textAlign: "center",
+          wordBreak: "break-word",
+          overflow: "hidden",
+          display: "-webkit-box",
+          WebkitBoxOrient: "vertical",
+          WebkitLineClamp: focused ? 4 : 2,
+          opacity: 0.95,
+        }}
+      >
+        {item.name}
+      </span>
+    </Focusable>
+  );
+}
+
 type PaneViewProps = {
   pane: PaneApi;
   dual: boolean;
@@ -720,6 +861,7 @@ type PaneViewProps = {
   showHidden: boolean;
   sortOrder: string;
   fileTypeFilter: string;
+  viewMode: ViewMode;
   onPaneFocus: (index: PaneIndex) => void;
   onOpenDir: (pane: PaneApi, item: FileEntry) => void;
   registerContainer: (index: PaneIndex, element: HTMLDivElement | null) => void;
@@ -732,15 +874,37 @@ function PaneView({
   showHidden,
   sortOrder,
   fileTypeFilter,
+  viewMode,
   onPaneFocus,
   onOpenDir,
   registerContainer,
 }: PaneViewProps) {
   const [visibleItemCount, setVisibleItemCount] = useState(150);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  // A listing the panel has not scrolled to the top of yet.
+  const pendingScrollReset = useRef(true);
 
   useEffect(() => {
     setVisibleItemCount(150);
-  }, [pane.path, showHidden, sortOrder, fileTypeFilter]);
+    pendingScrollReset.current = true;
+  }, [pane.path, showHidden, sortOrder, fileTypeFilter, viewMode]);
+
+  /**
+   * A new listing starts at its own top.
+   *
+   * Keeping the previous offset meant opening a folder from halfway down a
+   * long one left its first entries above the fold, and turning hidden files
+   * on shifted everything under the cursor. The reset waits for the rows
+   * themselves: the listing arrives a beat after the path changes, and
+   * scrolling a container that still holds the old (or no) content does
+   * nothing.
+   */
+  useLayoutEffect(() => {
+    if (!pendingScrollReset.current || pane.loading) return;
+    pendingScrollReset.current = false;
+    const scroller = scrollRef.current;
+    if (scroller) scroller.scrollTop = 0;
+  }, [pane.loading, pane.items]);
 
   const filteredItems = useMemo(() => {
     let filtered = pane.items;
@@ -768,6 +932,48 @@ function PaneView({
     if (pane.loading) return <PanelSectionRow>{t("action.loading")}</PanelSectionRow>;
     if (pane.error) return <PanelSectionRow>{pane.error}</PanelSectionRow>;
     if (!filteredItems.length) return <PanelSectionRow>{t("panel.empty")}</PanelSectionRow>;
+
+    const showMore = hasMoreItems ? (
+      <PanelSectionRow>
+        <ButtonItem onClick={() => setVisibleItemCount((count) => count + 150)}>
+          {t("action.show_more").replace("{count}", String(filteredItems.length - visibleItems.length))}
+        </ButtonItem>
+      </PanelSectionRow>
+    ) : null;
+
+    if (viewMode === "grid") {
+      return (
+        <>
+          <Focusable
+            flow-children="grid"
+            style={{
+              display: "grid",
+              gridTemplateColumns: `repeat(auto-fill, minmax(${dual ? 92 : 116}px, 1fr))`,
+              gap: 8,
+              padding: "2px 2px 8px",
+            }}
+          >
+            {visibleItems.map((item) => (
+              // The path lives on a wrapper here, the same as in the list, so
+              // the focus-restore and context-menu lookups keep finding a
+              // focusable *inside* what they matched.
+              <div key={item.path} data-item-path={item.path} data-pane-index={pane.index} style={{ minWidth: 0 }}>
+                <GridTile
+                  item={item}
+                  dual={dual}
+                  onOpen={() => onOpenDir(pane, item)}
+                  onFocus={() => {
+                    pane.setFocusPath(item.path);
+                    onPaneFocus(pane.index);
+                  }}
+                />
+              </div>
+            ))}
+          </Focusable>
+          {showMore}
+        </>
+      );
+    }
 
     return (
       <Focusable navEntryPreferPosition={NavEntryPositionPreferences.MAINTAIN_Y}>
@@ -803,13 +1009,7 @@ function PaneView({
             </PanelSectionRow>
           </div>
         ))}
-        {hasMoreItems ? (
-          <PanelSectionRow>
-            <ButtonItem onClick={() => setVisibleItemCount((count) => count + 150)}>
-              {t("action.show_more").replace("{count}", String(filteredItems.length - visibleItems.length))}
-            </ButtonItem>
-          </PanelSectionRow>
-        ) : null}
+        {showMore}
       </Focusable>
     );
   })();
@@ -877,6 +1077,7 @@ function PaneView({
             setVisibleItemCount((count) => Math.min(count + 150, filteredItems.length));
           }
         }}
+        ref={scrollRef}
         style={{ flex: 1, minHeight: 0, overflowY: "auto", paddingBottom: 48, boxSizing: "border-box" }}
       >
         <PanelSection title={dual ? undefined : t("panel.files")}>{rows}</PanelSection>
@@ -1254,7 +1455,11 @@ function FileManagerPage() {
   const panesRef = useRef<[PaneApi, PaneApi]>([paneA, paneB]);
   panesRef.current = [paneA, paneB];
 
-  const [dualPane, setDualPane] = useState(false);
+  // Read once, on the first render, so the toolbar comes up already showing
+  // what was left set last time instead of correcting itself a frame later.
+  const storedPreferences = useRef(loadPreferences());
+
+  const [dualPane, setDualPane] = useState(storedPreferences.current.dualPane);
   const dualPaneRef = useRef(false);
   // Mirror the rendered state every render. Maintaining this ref by hand
   // inside the setter let it drift out of sync with what is on screen.
@@ -1267,9 +1472,14 @@ function FileManagerPage() {
   const activePane = activePaneIndex === 0 ? paneA : paneB;
 
   const [drives, setDrives] = useState<DriveEntry[]>([]);
-  const [showHidden, setShowHidden] = useState(false);
-  const [sortOrder, setSortOrder] = useState("asc");
-  const [fileTypeFilter, setFileTypeFilter] = useState("all");
+  const [showHidden, setShowHidden] = useState(storedPreferences.current.showHidden);
+  const [sortOrder, setSortOrder] = useState(storedPreferences.current.sortOrder);
+  const [fileTypeFilter, setFileTypeFilter] = useState(storedPreferences.current.fileTypeFilter);
+  const [viewMode, setViewMode] = useState<ViewMode>(storedPreferences.current.viewMode);
+
+  useEffect(() => {
+    savePreferences({ showHidden, sortOrder, fileTypeFilter, viewMode, dualPane });
+  }, [showHidden, sortOrder, fileTypeFilter, viewMode, dualPane]);
 
   const backTimeout = useRef<number | null>(null);
   const exitHoldFrame = useRef<number | null>(null);
@@ -3058,6 +3268,19 @@ function FileManagerPage() {
                       />
                     </div>
                   </div>
+                  <div style={{ flex: "1 1 0%", minWidth: 0, display: "flex", alignItems: "center", justifyContent: "flex-start", padding: "0" }}>
+                    <div style={{ width: "100%", minWidth: 0 }}>
+                      <DropdownItem
+                        label={t("label.view")}
+                        rgOptions={[
+                          { label: t("option.list"), data: "list" },
+                          { label: t("option.grid"), data: "grid" },
+                        ]}
+                        selectedOption={viewMode}
+                        onChange={(option) => setViewMode(option.data as ViewMode)}
+                      />
+                    </div>
+                  </div>
                 </Focusable>
               </div>
 
@@ -3091,6 +3314,7 @@ function FileManagerPage() {
                     showHidden={showHidden}
                     sortOrder={sortOrder}
                     fileTypeFilter={fileTypeFilter}
+                    viewMode={viewMode}
                     onPaneFocus={setActivePane}
                     onOpenDir={handleOpenDir}
                     registerContainer={registerPaneContainer}

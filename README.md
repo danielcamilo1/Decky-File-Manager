@@ -28,11 +28,12 @@ Manage your files and folders without leaving Gaming Mode. Browse directories, c
 * Native Gaming Mode integration.
 * Full controller navigation support.
 * **Dual-panel (split) view** — browse two folders side by side.
+* **List and grid views**, with your view, sorting and filter choices remembered between sessions.
 * **Copy and move directly between panels**, the way desktop file managers work.
 * **Quick access to connected drives** — SD card, USB sticks and external drives.
 * **Built-in text editor** — read a file whole and edit it line by line with the SteamOS keyboard, without leaving Gaming Mode.
 * **Recent folders** — jump straight back to the last folders you visited.
-* **Browse a game's files from its own Steam menu** — installation folder or Proton compatdata, in one pick.
+* **Browse a game's files from its own Steam menu** — installation folder or Proton compatdata, in one pick. Non-Steam shortcuts included.
 * File and folder management.
 * Copy, move, rename, and delete operations.
 * Archive extraction (zip, tar and variants).
@@ -40,6 +41,18 @@ Manage your files and folders without leaving Gaming Mode. Browse directories, c
 * Designed for SteamOS and Bazzite.
 * Lightweight and easy to use.
 * SteamOS-inspired user interface.
+
+## Views
+
+The file list can be read two ways, and the choice sticks:
+
+* **List** is the default — one entry per row, with the full name on show.
+* **Grid** lays the folder out as tiles, so a folder of many short names fits on one screen instead of several. The D-pad moves between tiles in every direction, the tile under the cursor is filled and raised so there is no hunting for the selection on a TV, and it drops its name clamp so a long filename can still be read in full.
+* Both panels of the split view share the view, and the tiles shrink to suit.
+
+**Hidden files**, **order**, **type filter**, **view** and the **split** itself are remembered, so the plugin opens the way you left it rather than back at the defaults every time.
+
+Opening a folder — or turning hidden files on — always puts you back at the top of the list, instead of leaving the first entries above the fold.
 
 ## Split view
 
@@ -83,7 +96,7 @@ The last folders you opened are remembered, so getting back to one is a couple o
 
 A game's own context menu — the one the **Options** button opens on a game in the library — gains a **Browse local files** submenu:
 
-* **Installation folder** opens the game's folder under `steamapps/common`, on whichever drive it is installed to.
+* **Installation folder** opens the game's folder under `steamapps/common`, on whichever drive it is installed to. A non-Steam shortcut has no such folder, so its own **Target** is used instead — the entry lands in the folder the shortcut launches from.
 * **Compatdata folder** opens its Proton prefix, where saves and configuration for Windows games live. It exists from the first time the game runs through Proton.
 
 Both open the full file manager straight at the folder, so a mod or a config file is a couple of presses from the game itself.

@@ -1093,7 +1093,156 @@ class Plugin:
             if install and compat:
                 break
 
+        if install is None:
+            # No manifest means it is not a Steam game. A non-Steam shortcut
+            # still knows where it points, so the folder comes from the
+            # shortcut's own Target field instead.
+            shortcut = self._shortcut_folder(appid)
+            install = shortcut.get("install")
+            if name is None:
+                name = shortcut.get("name")
+
         return {"install": install, "compat": compat, "name": name}
+
+    def _parse_binary_vdf(self, data: bytes, pos: int = 0) -> tuple:
+        """One map out of a binary VDF, and where it ended.
+
+        shortcuts.vdf is Steam's binary format, not the text one: a map is a
+        run of typed entries — 0x00 nested map, 0x01 string, 0x02 int32,
+        0x07 uint64 — each a NUL-terminated key followed by its value, closed
+        by 0x08. Keys are lowercased because Steam's own casing has changed
+        between clients ("AppName" and "appname" both appear in the wild).
+        """
+        result: dict = {}
+        size = len(data)
+
+        while pos < size:
+            marker = data[pos]
+            pos += 1
+            if marker == 0x08:
+                return result, pos
+
+            end = data.find(b"\x00", pos)
+            if end == -1:
+                break
+            key = data[pos:end].decode("utf-8", "replace").lower()
+            pos = end + 1
+
+            if marker == 0x00:
+                value, pos = self._parse_binary_vdf(data, pos)
+            elif marker == 0x01:
+                end = data.find(b"\x00", pos)
+                if end == -1:
+                    break
+                value = data[pos:end].decode("utf-8", "replace")
+                pos = end + 1
+            elif marker == 0x02:
+                value = int.from_bytes(data[pos:pos + 4], "little", signed=False)
+                pos += 4
+            elif marker == 0x07:
+                value = int.from_bytes(data[pos:pos + 8], "little", signed=False)
+                pos += 8
+            else:
+                # An entry type this reader does not know: the rest of the
+                # file can no longer be located, so stop with what was read.
+                break
+
+            result[key] = value
+
+        return result, pos
+
+    def _shortcut_entries(self) -> list:
+        """Every non-Steam shortcut, from every account on this machine."""
+        entries: list = []
+
+        for root in self._steam_roots():
+            userdata = os.path.join(root, "userdata")
+            if not os.path.isdir(userdata):
+                continue
+            try:
+                users = os.listdir(userdata)
+            except OSError:
+                continue
+
+            for user in users:
+                path = os.path.join(userdata, user, "config", "shortcuts.vdf")
+                if not os.path.isfile(path):
+                    continue
+                try:
+                    with open(path, "rb") as f:
+                        data = f.read()
+                except OSError:
+                    continue
+                try:
+                    parsed, _ = self._parse_binary_vdf(data)
+                except (ValueError, IndexError):
+                    continue
+
+                shortcuts = parsed.get("shortcuts")
+                if not isinstance(shortcuts, dict):
+                    continue
+                for entry in shortcuts.values():
+                    if isinstance(entry, dict):
+                        entries.append(entry)
+
+        return entries
+
+    def _shortcut_ids(self, entry: dict) -> set:
+        """The ids a shortcut can be known by in the library.
+
+        The stored appid is a 32-bit value that some clients wrote signed, and
+        older shortcuts have none at all — theirs is derived from the target
+        and the name, the way Steam derives it.
+        """
+        import zlib
+
+        ids: set = set()
+
+        raw = entry.get("appid")
+        if isinstance(raw, int):
+            ids.add(raw & 0xFFFFFFFF)
+
+        # Steam derives the legacy id from the target exactly as stored,
+        # quotes included; the unquoted form is added too, since it is what
+        # some clients wrote.
+        raw_exe = str(entry.get("exe") or "")
+        appname = str(entry.get("appname") or "")
+        for variant in (raw_exe, raw_exe.strip().strip('"')):
+            if not variant:
+                continue
+            legacy = zlib.crc32((variant + appname).encode("utf-8")) | 0x80000000
+            ids.add(legacy & 0xFFFFFFFF)
+
+        return ids
+
+    def _shortcut_folder(self, appid: str) -> dict:
+        """Where a non-Steam shortcut lives, taken from its Target field.
+
+        Target is the executable the shortcut launches, so its directory is
+        what the game's folder means for a non-Steam game. "Start In" is the
+        fallback: it is normally the same folder, and it is what remains when
+        the target itself has gone missing.
+        """
+        try:
+            wanted = int(appid) & 0xFFFFFFFF
+        except ValueError:
+            return {"install": None, "name": None}
+
+        for entry in self._shortcut_entries():
+            if wanted not in self._shortcut_ids(entry):
+                continue
+
+            name = str(entry.get("appname") or "").strip() or None
+            exe = str(entry.get("exe") or "").strip().strip('"')
+            start_dir = str(entry.get("startdir") or "").strip().strip('"')
+
+            for candidate in (os.path.dirname(exe) if exe else "", start_dir):
+                if candidate and os.path.isdir(candidate):
+                    return {"install": os.path.realpath(candidate), "name": name}
+
+            return {"install": None, "name": name}
+
+        return {"install": None, "name": None}
 
     async def get_game_folders(self, appid: str) -> dict:
         appid = str(appid or "").strip()
