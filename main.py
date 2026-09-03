@@ -987,6 +987,121 @@ class Plugin:
         return {"drives": drives}
 
     # ------------------------------------------------------------------
+    # Steam game folders (for the library context menu)
+    # ------------------------------------------------------------------
+
+    _STEAM_ROOT_CANDIDATES = (
+        "~/.local/share/Steam",
+        "~/.steam/steam",
+        "~/.steam/root",
+        "~/.var/app/com.valvesoftware.Steam/.local/share/Steam",
+    )
+
+    def _steam_roots(self) -> list:
+        home = os.environ.get("DECKY_USER_HOME") or os.path.expanduser("~")
+        roots: list = []
+        seen: set = set()
+
+        for candidate in self._STEAM_ROOT_CANDIDATES:
+            path = os.path.join(home, candidate[2:]) if candidate.startswith("~/") else candidate
+            if not os.path.isdir(path):
+                continue
+            real = os.path.realpath(path)
+            if real in seen:
+                continue
+            seen.add(real)
+            roots.append(real)
+
+        return roots
+
+    def _steam_libraries(self) -> list:
+        """Every steamapps directory Steam knows about, the install roots included.
+
+        libraryfolders.vdf has had two shapes: `"1" "/path"` in the old one and
+        a nested block with a `"path"` key in the current one. Both are read by
+        the same scan, rather than by a VDF parser the plugin does not ship.
+        Entries that are not library folders — the numeric keys inside an
+        "apps" block match the same pattern — fall out on the isdir check.
+        """
+        import re
+
+        libraries: list = []
+        seen: set = set()
+
+        def add(folder: str) -> None:
+            if not folder:
+                return
+            for name in ("steamapps", "SteamApps"):
+                steamapps = os.path.join(folder, name)
+                if not os.path.isdir(steamapps):
+                    continue
+                real = os.path.realpath(steamapps)
+                if real in seen:
+                    return
+                seen.add(real)
+                libraries.append(real)
+                return
+
+        for root in self._steam_roots():
+            add(root)
+            for name in ("steamapps", "SteamApps"):
+                vdf = os.path.join(root, name, "libraryfolders.vdf")
+                if not os.path.isfile(vdf):
+                    continue
+                try:
+                    with open(vdf, "r", encoding="utf-8", errors="replace") as f:
+                        content = f.read()
+                except OSError:
+                    continue
+                for match in re.finditer(r'"(?:path|\d+)"\s+"([^"]+)"', content):
+                    add(match.group(1))
+
+        return libraries
+
+    def _game_folders(self, appid: str) -> dict:
+        import re
+
+        install = None
+        compat = None
+        name = None
+
+        for steamapps in self._steam_libraries():
+            if install is None:
+                manifest = os.path.join(steamapps, "appmanifest_" + appid + ".acf")
+                if os.path.isfile(manifest):
+                    try:
+                        with open(manifest, "r", encoding="utf-8", errors="replace") as f:
+                            content = f.read()
+                    except OSError:
+                        content = ""
+                    title = re.search(r'"name"\s+"([^"]*)"', content)
+                    if title and name is None:
+                        name = title.group(1)
+                    installdir = re.search(r'"installdir"\s+"([^"]+)"', content)
+                    if installdir:
+                        candidate = os.path.join(steamapps, "common", installdir.group(1))
+                        if os.path.isdir(candidate):
+                            install = candidate
+
+            if compat is None:
+                # Non-Steam shortcuts have no manifest but do get a prefix, so
+                # this is looked up on its own rather than off the install dir.
+                candidate = os.path.join(steamapps, "compatdata", appid)
+                if os.path.isdir(candidate):
+                    compat = candidate
+
+            if install and compat:
+                break
+
+        return {"install": install, "compat": compat, "name": name}
+
+    async def get_game_folders(self, appid: str) -> dict:
+        appid = str(appid or "").strip()
+        if not appid.isdigit():
+            raise ValueError("AppID inválido")
+        return await asyncio.to_thread(self._game_folders, appid)
+
+    # ------------------------------------------------------------------
     # Direct transfers between panels (do not touch the clipboard)
     # ------------------------------------------------------------------
 
