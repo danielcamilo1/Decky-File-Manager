@@ -107,8 +107,6 @@
   "editor.saved": "已保存",
   "editor.unsaved": "未保存的更改",
   "editor.read_only": "只读",
-  "editor.placeholder": "空文件",
-  "editor.wrap": "自动换行",
   "editor.lines": "{count} 行",
   "editor.discard_message": "“{name}”有未保存的更改。",
   "editor.discard": "放弃",
@@ -126,16 +124,13 @@
   "editor.error_binary": "此文件不是文本，无法编辑。",
   "editor.error_too_large": "此文件过大，无法编辑（上限 1 MB）。",
   "editor.hint": "在某一行按 A 键编辑该行。保存会写入文件；B 键返回。",
-  "editor.edit_line": "第 {number} 行",
-  "editor.apply": "应用",
-  "editor.line_empty": "（空行）",
   "editor.insert_line": "插入行",
   "editor.delete_line": "删除行",
   "recent.failed": "无法加载文件夹历史记录。",
-  "editor.space": "空格",
   "editor.clear_line": "清除",
   "menu.recent_locations": "最近位置",
   "editor.done": "完成",
-  "editor.position": "第 {line} 行，第 {column} 列",
-  "editor.edit_hint": "使用下方按键输入。◀ ▶（或 L1/R1）移动光标，▲ ▼ 切换行，↵ 在光标处换行，B 应用并返回。"
+  "editor.edit_hint": "文件仍显示在上方，并标出当前行。▲ ▼ 将输入框移到相邻行，完成即应用，B 应用并返回。",
+  "editor.line_of": "第 {number} 行，共 {count} 行",
+  "editor.split_line": "在此拆分"
 }

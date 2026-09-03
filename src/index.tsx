@@ -1,4 +1,4 @@
-import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ReactNode, forwardRef, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { t, loadRemoteTranslations, getLocale } from "./i18n";
 import pluginInfo from "../plugin.json";
 import packageInfo from "../package.json";
@@ -890,102 +890,6 @@ function PaneView({
   );
 }
 
-/**
- * An on-screen keyboard built out of ordinary buttons.
- *
- * Steam's own keyboard is attached to its TextField and could not be made to
- * appear here, so rather than keep chasing it, this types without Steam's help
- * at all: every key is a DialogButton inside a Focusable, exactly like the file
- * list rows that the D-pad already drives. Nothing about it can fail for
- * reasons outside this file.
- */
-const KEY_ROWS_LOWER = [
-  ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"],
-  ["q", "w", "e", "r", "t", "y", "u", "i", "o", "p"],
-  ["a", "s", "d", "f", "g", "h", "j", "k", "l", "-"],
-  ["z", "x", "c", "v", "b", "n", "m", ".", "/", "_"],
-];
-
-const KEY_ROWS_UPPER = [
-  ["!", "@", "#", "$", "%", "^", "&", "*", "(", ")"],
-  ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"],
-  ["A", "S", "D", "F", "G", "H", "J", "K", "L", "+"],
-  ["Z", "X", "C", "V", "B", "N", "M", ",", "?", "="],
-];
-
-const KEY_ROWS_SYMBOLS = [
-  ["~", "`", "|", "\\", ":", ";", "\"", "'", "<", ">"],
-  ["[", "]", "{", "}", "(", ")", "/", "?", "!", "*"],
-  ["@", "#", "$", "%", "^", "&", "-", "_", "+", "="],
-  [".", ",", "0", "1", "2", "3", "4", "5", "6", "7"],
-];
-
-function OnScreenKeyboard({
-  onKey,
-  onBackspace,
-  onSpace,
-  onEnter,
-  onCaret,
-  onLine,
-  onDone,
-}: {
-  onKey: (character: string) => void;
-  onBackspace: () => void;
-  onSpace: () => void;
-  onEnter: () => void;
-  onCaret: (delta: number) => void;
-  onLine: (delta: number) => void;
-  onDone: () => void;
-}) {
-  const [mode, setMode] = useState<"lower" | "upper" | "symbols">("lower");
-  const rows = mode === "lower" ? KEY_ROWS_LOWER : mode === "upper" ? KEY_ROWS_UPPER : KEY_ROWS_SYMBOLS;
-
-  const keyStyle = {
-    minWidth: 0,
-    flex: "1 1 0%",
-    padding: "5px 0",
-    fontSize: 14,
-    fontFamily: "Consolas, 'Courier New', monospace",
-  } as const;
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4, paddingTop: 6 }}>
-      {rows.map((row, rowIndex) => (
-        <Focusable key={rowIndex} style={{ display: "flex", gap: 4 }}>
-          {row.map((character, keyIndex) => (
-            <DialogButton key={`${rowIndex}-${keyIndex}`} style={keyStyle} onClick={() => onKey(character)}>
-              {character}
-            </DialogButton>
-          ))}
-        </Focusable>
-      ))}
-
-      <Focusable style={{ display: "flex", gap: 4 }}>
-        <DialogButton style={keyStyle} onClick={() => setMode(mode === "upper" ? "lower" : "upper")}>
-          {mode === "upper" ? "abc" : "ABC"}
-        </DialogButton>
-        <DialogButton style={keyStyle} onClick={() => setMode(mode === "symbols" ? "lower" : "symbols")}>
-          {mode === "symbols" ? "abc" : "#+="}
-        </DialogButton>
-        <DialogButton style={{ ...keyStyle, flex: "3 1 0%" }} onClick={onSpace}>{t("editor.space")}</DialogButton>
-        <DialogButton style={keyStyle} onClick={onBackspace}>{"⌫"}</DialogButton>
-        {/* Splits the line at the cursor, the way Enter does in any editor. */}
-        <DialogButton style={keyStyle} onClick={onEnter}>{"↵"}</DialogButton>
-      </Focusable>
-
-      <Focusable style={{ display: "flex", gap: 4 }}>
-        <DialogButton style={keyStyle} onClick={() => onCaret(-1)}>{"◀"}</DialogButton>
-        <DialogButton style={keyStyle} onClick={() => onCaret(1)}>{"▶"}</DialogButton>
-        {/* Commit this line and carry on typing the one above/below, without
-            leaving the keyboard: the whole point of the redesign. */}
-        <DialogButton style={keyStyle} onClick={() => onLine(-1)}>{"▲"}</DialogButton>
-        <DialogButton style={keyStyle} onClick={() => onLine(1)}>{"▼"}</DialogButton>
-        <DialogButton style={{ ...keyStyle, flex: "2 1 0%" }} onClick={onDone}>{t("editor.done")}</DialogButton>
-      </Focusable>
-    </div>
-  );
-}
-
 type EditorBuffer = {
   path: string;
   name: string;
@@ -996,22 +900,70 @@ type EditorBuffer = {
   readOnly: boolean;
 };
 
+const EDITOR_MONOSPACE = { fontFamily: "Consolas, 'Courier New', monospace", fontSize: 13, lineHeight: "18px" } as const;
+const EDITOR_GUTTER = { opacity: 0.3, minWidth: 34, textAlign: "right", flexShrink: 0, userSelect: "none" } as const;
+
+/**
+ * One line of the file.
+ *
+ * Deliberately not a ButtonItem: a panel row per line turned the file into a
+ * form and put about eight lines on screen. This is a bare focusable row at
+ * the text's own height, so the file reads as a document while still being
+ * something the D-pad can walk down. The line under the cursor drops its
+ * truncation so a long line can be read in full.
+ */
+const EditorLine = forwardRef<HTMLDivElement, {
+  index: number;
+  text: string;
+  editing: boolean;
+  onStart: () => void;
+}>(function EditorLine({ index, text, editing, onStart }, ref) {
+  const [focused, setFocused] = useState(false);
+  const expanded = focused || editing;
+
+  return (
+    <Focusable
+      ref={ref}
+      onActivate={onStart}
+      onClick={onStart}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
+      style={{
+        display: "flex",
+        gap: 10,
+        minWidth: 0,
+        padding: "0 6px",
+        borderRadius: 2,
+        background: editing ? "rgba(103,193,245,0.22)" : focused ? "rgba(255,255,255,0.1)" : "transparent",
+        ...EDITOR_MONOSPACE,
+      }}
+    >
+      <span style={EDITOR_GUTTER}>{index + 1}</span>
+      <span
+        style={
+          expanded
+            ? { minWidth: 0, whiteSpace: "pre-wrap", wordBreak: "break-all" }
+            : { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }
+        }
+      >
+        {text.length ? text : " "}
+      </span>
+    </Focusable>
+  );
+});
+
 /**
  * The file editor, rendered inline on the page in place of the file list.
  *
- * Not a modal on purpose. A dialog only joins Steam's gamepad navigation
- * when its modal manager mounts it, and that could not be made to work here
- * — the editor was reachable by touch at best. The page itself is navigable,
- * so the editor lives there and uses the same components as the file list.
+ * Not a modal on purpose. A dialog only joins Steam's gamepad navigation when
+ * its modal manager mounts it, and that could not be made to work here — the
+ * editor was reachable by touch at best. The page is navigable, so the editor
+ * lives on it and uses the same components as the file list.
  *
- * It has two modes, like a console text editor:
- *
- * - Reading: the whole file as a list of lines. A on a line starts editing it.
- * - Typing: the lines around the one being edited stay on screen with a cursor
- *   drawn in place, and the keyboard sits underneath. The keyboard never
- *   disappears between lines — ▲/▼ commit the current line and move to the
- *   next, ↵ splits a line, ◀/▶ (and L1/R1) move the cursor — so a run of edits
- *   is one continuous session rather than one round trip per line.
+ * The file is always on screen, whole. Picking a line opens a field for it
+ * underneath — Steam's own TextField, which is what raises the SteamOS
+ * keyboard — while the document stays visible above with that line marked in
+ * place, and ▲/▼ carry the field to the next line without closing it.
  */
 function EditorView({
   buffer,
@@ -1023,15 +975,11 @@ function EditorView({
   discardPrompt,
   editingLine,
   editingValue,
-  editingCaret,
   visibleLines,
   onEditingText,
   onStartLine,
-  onInsertText,
-  onBackspace,
-  onEnter,
-  onCaret,
   onMoveLine,
+  onSplitLine,
   onApplyLine,
   onCancelLine,
   onClearLine,
@@ -1053,15 +1001,11 @@ function EditorView({
   discardPrompt: boolean;
   editingLine: number | null;
   editingValue: string;
-  editingCaret: number;
   visibleLines: number;
   onEditingText: (value: string, caret: number) => void;
   onStartLine: (index: number) => void;
-  onInsertText: (text: string) => void;
-  onBackspace: () => void;
-  onEnter: () => void;
-  onCaret: (delta: number) => void;
   onMoveLine: (delta: number) => void;
+  onSplitLine: () => void;
   onApplyLine: () => void;
   onCancelLine: () => void;
   onClearLine: () => void;
@@ -1078,6 +1022,17 @@ function EditorView({
   const dirty = buffer.content !== buffer.original;
   const editing = editingLine !== null;
 
+  // Keep the line being typed in view as ▲/▼ walk the field down the file.
+  const editingRowRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (editingLine === null) return;
+    try {
+      editingRowRef.current?.scrollIntoView({ block: "nearest" });
+    } catch {
+      // Older webviews without the options argument; not worth failing over.
+    }
+  }, [editingLine]);
+
   const status = buffer.readOnly
     ? t("editor.read_only")
     : loading
@@ -1088,17 +1043,7 @@ function EditorView({
           ? t("editor.saved")
           : buffer.encoding;
 
-  // The lines on either side of the one being typed, so the file stays legible
-  // while editing instead of being replaced by a lone text field.
-  const contextStart = editing ? Math.max(0, editingLine - 3) : 0;
-  const contextEnd = editing ? Math.min(lines.length, editingLine + 4) : 0;
-  const context: number[] = [];
-  for (let index = contextStart; index < contextEnd; index += 1) context.push(index);
-
-  const caret = Math.max(0, Math.min(editingCaret, editingValue.length));
-
-  const gutterStyle = { opacity: 0.35, minWidth: 34, textAlign: "right", flexShrink: 0 } as const;
-  const monospace = { fontFamily: "Consolas, 'Courier New', monospace", fontSize: 13 } as const;
+  const actionStyle = { flex: 1, minWidth: 0, fontSize: 13, padding: "6px 0" } as const;
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", minWidth: 0 }}>
@@ -1107,7 +1052,7 @@ function EditorView({
         <span style={{ fontSize: 12, opacity: 0.55, flexShrink: 0 }}>{status}</span>
         <span style={{ fontSize: 12, opacity: 0.4, flexShrink: 0, marginLeft: "auto" }}>
           {editing
-            ? t("editor.position").replace("{line}", String(editingLine + 1)).replace("{column}", String(caret + 1))
+            ? t("editor.line_of").replace("{number}", String(editingLine + 1)).replace("{count}", String(lines.length))
             : t("editor.lines").replace("{count}", String(lines.length))}
         </span>
       </div>
@@ -1138,143 +1083,70 @@ function EditorView({
         </div>
       ) : null}
 
+      <div style={{ fontSize: 11, opacity: 0.5, padding: "0 2px 6px" }}>
+        {loading ? t("editor.loading") : editing ? t("editor.edit_hint") : t("editor.hint")}
+      </div>
+
+      {/* The file itself, always on screen — including while a line is being
+          typed, so the edit is made in view of its surroundings. */}
+      <div style={{ flex: 1, minHeight: 0, overflowY: "auto", minWidth: 0, padding: "4px 0", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 4, background: "rgba(0,0,0,0.3)" }}>
+        <Focusable navEntryPreferPosition={NavEntryPositionPreferences.MAINTAIN_Y}>
+          {lines.slice(0, visibleLines).map((line, index) => (
+            <EditorLine
+              key={index}
+              ref={index === editingLine ? editingRowRef : undefined}
+              index={index}
+              text={index === editingLine ? editingValue : line}
+              editing={index === editingLine}
+              onStart={() => onStartLine(index)}
+            />
+          ))}
+
+          {lines.length > visibleLines ? (
+            <div style={{ padding: "6px 6px 2px" }}>
+              <DialogButton style={{ padding: "6px 0", fontSize: 13 }} onClick={onShowMore}>
+                {t("action.show_more").replace("{count}", String(lines.length - visibleLines))}
+              </DialogButton>
+            </div>
+          ) : null}
+        </Focusable>
+      </div>
+
       {editing ? (
-        <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", minWidth: 0 }}>
-          <div
-            style={{
-              ...monospace,
-              padding: "6px 4px",
-              marginBottom: 6,
-              borderRadius: 4,
-              border: "1px solid rgba(255,255,255,0.12)",
-              background: "rgba(0,0,0,0.3)",
-              overflowY: "auto",
-              maxHeight: 190,
-              minWidth: 0,
-            }}
-          >
-            {context.map((index) => {
-              const current = index === editingLine;
-              const text = current ? editingValue : lines[index] ?? "";
-              return (
-                <div
-                  key={index}
-                  style={{
-                    display: "flex",
-                    gap: 10,
-                    minWidth: 0,
-                    padding: "1px 4px",
-                    borderRadius: 2,
-                    background: current ? "rgba(103,193,245,0.16)" : "transparent",
-                  }}
-                >
-                  <span style={gutterStyle}>{index + 1}</span>
-                  {current ? (
-                    <span style={{ minWidth: 0, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
-                      {text.slice(0, caret)}
-                      <span
-                        style={{
-                          display: "inline-block",
-                          width: 0,
-                          borderLeft: "2px solid #67c1f5",
-                          height: "1em",
-                          verticalAlign: "text-bottom",
-                        }}
-                      />
-                      {text.slice(caret)}
-                    </span>
-                  ) : (
-                    <span
-                      style={{
-                        minWidth: 0,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                        opacity: text.length ? 0.6 : 0.25,
-                      }}
-                    >
-                      {text}
-                    </span>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-
-          <div style={{ fontSize: 11, opacity: 0.5, padding: "0 2px 4px" }}>{t("editor.edit_hint")}</div>
-
-          {/* Steam's own field, kept for a hardware keyboard and for anyone
-              whose on-screen keyboard does come up; the keys below type
-              without it. */}
-          <div data-line-input style={{ padding: "0 0 4px", minWidth: 0 }}>
+        <div style={{ paddingTop: 8, minWidth: 0 }}>
+          {/* Steam's own field: focusing it is what brings up the SteamOS
+              keyboard, so it is focused as soon as a line is picked. */}
+          <div data-line-input style={{ paddingBottom: 6, minWidth: 0 }}>
             <TextField
+              focusOnMount
               value={editingValue}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                onEditingText(e.currentTarget.value, e.currentTarget.selectionStart ?? e.currentTarget.value.length)
+              }
+              onSelect={(e: React.SyntheticEvent<HTMLInputElement>) =>
                 onEditingText(e.currentTarget.value, e.currentTarget.selectionStart ?? e.currentTarget.value.length)
               }
               bShowCopyAction={false}
             />
           </div>
 
-          <OnScreenKeyboard
-            onKey={onInsertText}
-            onBackspace={onBackspace}
-            onSpace={() => onInsertText(" ")}
-            onEnter={onEnter}
-            onCaret={onCaret}
-            onLine={onMoveLine}
-            onDone={onApplyLine}
-          />
+          <Focusable style={{ display: "flex", gap: 6 }}>
+            <DialogButton style={actionStyle} onClick={onApplyLine}>{t("editor.done")}</DialogButton>
+            <DialogButton style={actionStyle} onClick={onCancelLine}>{t("action.cancel")}</DialogButton>
+            {/* Carry the field to the next line without closing it. */}
+            <DialogButton style={actionStyle} disabled={editingLine === 0} onClick={() => onMoveLine(-1)}>{"▲"}</DialogButton>
+            <DialogButton style={actionStyle} disabled={editingLine >= lines.length - 1} onClick={() => onMoveLine(1)}>{"▼"}</DialogButton>
+          </Focusable>
 
           <Focusable style={{ display: "flex", gap: 6, paddingTop: 6, paddingBottom: 8 }}>
-            <DialogButton style={{ flex: 1, fontSize: 13 }} onClick={() => onInsertLine(editingLine)}>{t("editor.insert_line")}</DialogButton>
-            <DialogButton style={{ flex: 1, fontSize: 13 }} onClick={() => onDeleteLine(editingLine)}>{t("editor.delete_line")}</DialogButton>
-            <DialogButton style={{ flex: 1, fontSize: 13 }} onClick={onClearLine}>{t("editor.clear_line")}</DialogButton>
-            <DialogButton style={{ flex: 1, fontSize: 13 }} onClick={onCancelLine}>{t("action.cancel")}</DialogButton>
+            <DialogButton style={actionStyle} onClick={() => onInsertLine(editingLine)}>{t("editor.insert_line")}</DialogButton>
+            <DialogButton style={actionStyle} onClick={onSplitLine}>{t("editor.split_line")}</DialogButton>
+            <DialogButton style={actionStyle} onClick={() => onDeleteLine(editingLine)}>{t("editor.delete_line")}</DialogButton>
+            <DialogButton style={actionStyle} onClick={onClearLine}>{t("editor.clear_line")}</DialogButton>
           </Focusable>
         </div>
       ) : (
         <>
-          <div style={{ fontSize: 11, opacity: 0.5, padding: "0 2px 6px" }}>{loading ? t("editor.loading") : t("editor.hint")}</div>
-
-          <div style={{ flex: 1, minHeight: 0, overflowY: "auto", minWidth: 0, border: "1px solid rgba(255,255,255,0.12)", borderRadius: 4, background: "rgba(0,0,0,0.3)" }}>
-            <Focusable navEntryPreferPosition={NavEntryPositionPreferences.MAINTAIN_Y}>
-              {lines.slice(0, visibleLines).map((line, index) => (
-                <div key={index}>
-                  <PanelSectionRow>
-                    <Focusable onActivate={() => onStartLine(index)}>
-                      <ButtonItem onClick={() => onStartLine(index)} layout="below">
-                        <div style={{ width: "100%", display: "flex", gap: 10, minWidth: 0, textAlign: "left", ...monospace }}>
-                          <span style={gutterStyle}>{index + 1}</span>
-                          <span
-                            style={{
-                              minWidth: 0,
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
-                              opacity: line.length ? 0.95 : 0.35,
-                              fontStyle: line.length ? "normal" : "italic",
-                            }}
-                          >
-                            {line.length ? line : t("editor.line_empty")}
-                          </span>
-                        </div>
-                      </ButtonItem>
-                    </Focusable>
-                  </PanelSectionRow>
-                </div>
-              ))}
-
-              {lines.length > visibleLines ? (
-                <PanelSectionRow>
-                  <ButtonItem onClick={onShowMore}>
-                    {t("action.show_more").replace("{count}", String(lines.length - visibleLines))}
-                  </ButtonItem>
-                </PanelSectionRow>
-              ) : null}
-            </Focusable>
-          </div>
-
           <div style={{ fontSize: 11, opacity: 0.5, padding: "6px 2px", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", direction: "rtl", textAlign: "left" }}>
             {buffer.path}
           </div>
@@ -1510,7 +1382,6 @@ function FileManagerPage() {
   const toggleDualPaneRef = useRef<() => void>(() => null);
 
   const editorBackRef = useRef<() => void>(() => null);
-  const editorShoulderRef = useRef<(delta: number) => void>(() => null);
 
   const exitPlugin = useCallback(() => {
     Router.CloseSideMenus();
@@ -1901,12 +1772,6 @@ function FileManagerPage() {
           }
 
           if ((gamepadButton === GAMEPAD_BUTTON_LSHOULDER || gamepadButton === GAMEPAD_BUTTON_RSHOULDER) && isPressed) {
-            // Nothing to switch between inside the editor, so they move the
-            // text cursor instead.
-            if (editorOpenRef.current && !hasActiveModalRef.current) {
-              editorShoulderRef.current(gamepadButton === GAMEPAD_BUTTON_LSHOULDER ? -1 : 1);
-              return;
-            }
             if (isShortcutBlocked()) return;
             leavePathInput();
 
@@ -2427,40 +2292,6 @@ function FileManagerPage() {
     return lines;
   }, []);
 
-  const insertText = useCallback((text: string) => {
-    const value = editingValueRef.current;
-    const caret = Math.max(0, Math.min(editingCaretRef.current, value.length));
-    setEditingValue(value.slice(0, caret) + text + value.slice(caret));
-    setEditingCaret(caret + text.length);
-  }, []);
-
-  /** Deletes to the left of the cursor, joining onto the line above at column 1. */
-  const backspaceEditing = useCallback(() => {
-    const value = editingValueRef.current;
-    const caret = Math.max(0, Math.min(editingCaretRef.current, value.length));
-    if (caret > 0) {
-      setEditingValue(value.slice(0, caret - 1) + value.slice(caret));
-      setEditingCaret(caret - 1);
-      return;
-    }
-
-    const buffer = editorBufferRef.current;
-    const index = editingLineRef.current;
-    if (!buffer || buffer.readOnly || index === null || index === 0) return;
-    const lines = buffer.content.split("\n");
-    const previous = lines[index - 1] ?? "";
-    lines.splice(index - 1, 2, previous + value);
-    setEditorBuffer({ ...buffer, content: lines.join("\n") });
-    setEditingLine(index - 1);
-    setEditingValue(previous + value);
-    setEditingCaret(previous.length);
-  }, []);
-
-  const moveCaret = useCallback((delta: number) => {
-    const length = editingValueRef.current.length;
-    setEditingCaret(Math.max(0, Math.min(editingCaretRef.current + delta, length)));
-  }, []);
-
   /** Commit this line, then carry on typing the one above or below it. */
   const moveEditingLine = useCallback((delta: number) => {
     const index = editingLineRef.current;
@@ -2551,15 +2382,6 @@ function FileManagerPage() {
   }, [applyLineEdit, closeEditor]);
 
   editorBackRef.current = editorBack;
-
-  // The shoulder buttons do nothing else while the editor is open, so they
-  // drive the cursor: the most-wanted key without moving off the letter keys.
-  const editorShoulder = useCallback((delta: number) => {
-    if (editingLineRef.current === null) return;
-    moveCaret(delta);
-  }, [moveCaret]);
-
-  editorShoulderRef.current = editorShoulder;
 
   const handleConflictChoice = useCallback(async (strategy: string, applyToAll = false) => {
     if (!conflictModal) return;
@@ -3001,15 +2823,11 @@ function FileManagerPage() {
                   discardPrompt={editorDiscardPrompt}
                   editingLine={editingLine}
                   editingValue={editingValue}
-                  editingCaret={editingCaret}
                   visibleLines={visibleLines}
                   onEditingText={setEditingText}
                   onStartLine={startEditLine}
-                  onInsertText={insertText}
-                  onBackspace={backspaceEditing}
-                  onEnter={splitEditingLine}
-                  onCaret={moveCaret}
                   onMoveLine={moveEditingLine}
+                  onSplitLine={splitEditingLine}
                   onApplyLine={applyLineEdit}
                   onCancelLine={() => setEditingLine(null)}
                   onClearLine={() => setEditingText("", 0)}
