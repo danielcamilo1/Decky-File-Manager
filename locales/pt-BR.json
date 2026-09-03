@@ -107,8 +107,6 @@
   "editor.saved": "Salvo",
   "editor.unsaved": "Alterações não salvas",
   "editor.read_only": "Somente leitura",
-  "editor.placeholder": "Arquivo vazio",
-  "editor.wrap": "Quebrar linhas",
   "editor.lines": "{count} linhas",
   "editor.discard_message": "\"{name}\" tem alterações não salvas.",
   "editor.discard": "Descartar",
@@ -126,16 +124,13 @@
   "editor.error_binary": "Este arquivo não é texto e não pode ser editado.",
   "editor.error_too_large": "Este arquivo é grande demais para editar (limite de 1 MB).",
   "editor.hint": "Pressione A em uma linha para editá-la. Salvar grava o arquivo; B volta.",
-  "editor.edit_line": "Linha {number}",
-  "editor.apply": "Aplicar",
-  "editor.line_empty": "(linha vazia)",
   "editor.insert_line": "Inserir linha",
   "editor.delete_line": "Excluir linha",
   "recent.failed": "Não foi possível carregar o histórico de pastas.",
-  "editor.space": "Espaço",
   "editor.clear_line": "Limpar",
   "menu.recent_locations": "Locais recentes",
   "editor.done": "Concluir",
-  "editor.position": "Lin {line}, Col {column}",
-  "editor.edit_hint": "Digite com as teclas abaixo. ◀ ▶ (ou L1/R1) movem o cursor, ▲ ▼ mudam de linha, ↵ divide a linha, B aplica e volta."
+  "editor.edit_hint": "O arquivo continua acima com esta linha marcada. ▲ ▼ levam o campo para a linha seguinte, Concluir aplica, B aplica e volta.",
+  "editor.line_of": "Linha {number} de {count}",
+  "editor.split_line": "Dividir aqui"
 }
