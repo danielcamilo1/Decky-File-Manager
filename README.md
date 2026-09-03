@@ -4,9 +4,7 @@
 
 > This is a fork of [Ciphay/Decky-File-Manager](https://github.com/Ciphay/Decky-File-Manager), continuing the original plugin with additional features. All credit for the original work goes to [Ciphay](https://github.com/Ciphay).
 
-Decky File Manager is a native file manager plugin for SteamOS Gaming Mode, designed to provide a seamless and controller-friendly experience directly within the Steam interface.
-
-Manage your files and folders without leaving Gaming Mode. Browse directories, copy, move, rename, and delete files using an intuitive interface inspired by SteamOS, making file management feel like a natural part of the console experience.
+A native, controller-friendly file manager for SteamOS Gaming Mode. Browse, copy, move, rename, delete and extract files without leaving the Steam interface.
 
 ### Interface
 
@@ -23,48 +21,30 @@ Manage your files and folders without leaving Gaming Mode. Browse directories, c
 <img width="800" height="450" alt="Navigation" src="https://github.com/user-attachments/assets/5280ba95-df8e-419f-b7ca-74c60973c41e" />
 
 
-### Features
+## Features
 
-* Native Gaming Mode integration.
-* Full controller navigation support.
-* **Dual-panel (split) view** — browse two folders side by side.
-* **Copy and move directly between panels**, the way desktop file managers work.
-* **Quick access to connected drives** — SD card, USB sticks and external drives.
-* File and folder management.
-* Copy, move, rename, and delete operations.
-* Archive extraction (zip, tar and variants).
-* Multi-language support.
-* Designed for SteamOS and Bazzite.
-* Lightweight and easy to use.
-* SteamOS-inspired user interface.
-
-## Split view
-
-Open a second panel and work between two folders at once, instead of copying something, navigating away, and pasting.
-
-* Press **X**, or use the **Split** toggle in the toolbar, to open and close the split.
-* Press **L1** / **R1** to move between the left and right panel. The **D-pad** also crosses between them at the edge of a list.
-* The active panel is highlighted, and the path field and every action follow it — so there is never any doubt about which side you are working on.
-* Opening the split clones the current folder into the new panel once; after that each panel keeps its own location.
-
-With the split open, the **Y** options menu gains **Copy to other panel** and **Move to other panel**, which transfer straight to the other side without touching the clipboard.
-
-## Drives
-
-Connected drives appear as a row of shortcuts above the file list, each showing its free space, with the drive you are currently browsing highlighted. They are also listed in the **Y** options menu when no file is selected.
-
-Only drives worth navigating to are listed — SD cards, USB storage, external and secondary drives — along with **Home** and the filesystem **root**. System and OS partitions are deliberately filtered out.
+* **Split view** — two folders side by side, with **Copy / Move to other panel** in the **Y** menu.
+* **List and grid views** — grid fits more per screen; the tile under the cursor is filled and shows its full name.
+* **Toolbar** — Hidden, Split, Order, Type and View, all equally sized with the current value on show. **A** steps to the next value in place, no menus over the file list. Every choice is remembered between sessions.
+* **Built-in text editor** — the whole file on screen as numbered lines; **A** edits a line with the SteamOS keyboard, **▲/▼** move the field between lines, **Split here / Insert / Delete / Clear**, and **Save** writes back in place. UTF-8, UTF-16 and Latin-1 are read and saved in their own encoding. Unsaved work is always asked about before closing.
+* **Recent folders** — the last 12 folders under **Recent Locations** in the **Y** menu.
+* **Browse a game's files from its Steam menu** — **Browse local files** on any game opens its installation folder or Proton compatdata. Non-Steam shortcuts included.
+* **Drive shortcuts** — SD card, USB and external drives with free space, above the list; system partitions filtered out.
+* File and folder management, archive extraction (zip, tar and variants), multi-language support.
+* Designed for SteamOS and Bazzite. Lightweight, and SteamOS-inspired throughout.
 
 ## Controls
 
 | Button | Action |
 | --- | --- |
-| **A** | Open folder |
-| **B** | Go up one directory (hold to exit the plugin) |
+| **A** | Open folder, or open a text file in the editor |
+| **B** | Tap to go up one directory; **hold** to leave the plugin from any depth |
 | **X** | Toggle split view |
 | **Y** | Options menu |
 | **L1** / **R1** | Switch to the left / right panel |
 | **D-pad** | Navigate, and move between panels |
+
+The **Y** menu also has an **Exit file manager** entry, if you would rather not hold a button.
 
 ## Installation
 
@@ -72,18 +52,11 @@ Download the latest `decky-file-manager.zip` from the [releases](https://github.
 
 ## Support
 
-This plugin is free and open source, and it will stay that way. If it saved you a trip to Desktop Mode and you feel like saying thanks, you can buy me a coffee — it is genuinely appreciated and it keeps the updates coming ☕
+This plugin is free and open source, and it will stay that way. If it saved you a trip to Desktop Mode, you can buy me a coffee ☕ — starring the repo, reporting a bug or suggesting a feature helps just as much, and costs nothing.
 
 [![Buy me a coffee at ko-fi.com](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/danielcamilo)
 
-Starring the repo, reporting a bug or suggesting a feature helps just as much — and costs nothing.
-
-Decky File Manager was created to fill the gap of native file management in Gaming Mode, bringing the convenience of desktop file managers to a console-like environment without sacrificing usability or immersion.
-
-> **Beta Notice:** Decky File Manager is currently in beta. The plugin is fully functional, but new features, performance improvements, and interface refinements are actively being developed, including:
-> * Integration with "browse" button on game properties.
-> * Sudo operations.
->   
+Still on the list: sudo operations.
 
 ## License
 

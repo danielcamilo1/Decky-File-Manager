@@ -1,6 +1,7 @@
-import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ReactNode, forwardRef, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { t, loadRemoteTranslations, getLocale } from "./i18n";
 import pluginInfo from "../plugin.json";
+import packageInfo from "../package.json";
 import {
   ButtonItem,
   Focusable,
@@ -10,14 +11,16 @@ import {
   PanelSectionRow,
   Router,
   TextField,
-  ToggleField,
-  DropdownItem,
   ModalRoot,
   DialogBody,
   DialogButton,
 } from "@decky/ui";
 import { callable, definePlugin, routerHook } from "@decky/api";
 import { showContextMenu, Menu, MenuItem, MenuSeparator } from "@decky/ui";
+import { SubMenu } from "./steamMenu";
+import { patchLibraryContextMenu } from "./libraryContextMenu";
+import { ROUTE, hasPendingBrowse, subscribeBrowse, takePendingBrowse } from "./gameFolders";
+import type { BrowseRequest } from "./gameFolders";
 
 const FOCUSABLE_SELECTOR = "button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1']):not([disabled])";
 
@@ -171,34 +174,34 @@ function ModalFocusScope({ children }: { children: ReactNode }) {
   );
 }
 
-function BaseIcon({ children }: { children: ReactNode }) {
+function BaseIcon({ children, size = 16 }: { children: ReactNode; size?: number }) {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" style={{ flexShrink: 0 }}>
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" style={{ flexShrink: 0 }}>
       {children}
     </svg>
   );
 }
 
-function FolderIcon() {
+function FolderIcon({ size }: { size?: number }) {
   return (
-    <BaseIcon>
+    <BaseIcon size={size}>
       <path d="M19.5 21a3 3 0 0 0 3-3v-4.5a3 3 0 0 0-3-3h-15a3 3 0 0 0-3 3V18a3 3 0 0 0 3 3h15ZM1.5 10.146V6a3 3 0 0 1 3-3h5.379a2.25 2.25 0 0 1 1.59.659l2.122 2.121c.14.141.331.22.53.22H19.5a3 3 0 0 1 3 3v1.146A4.483 4.483 0 0 0 19.5 9h-15a4.483 4.483 0 0 0-3 1.146Z" />
     </BaseIcon>
   );
 }
 
-function DocumentIcon() {
+function DocumentIcon({ size }: { size?: number }) {
   return (
-    <BaseIcon>
+    <BaseIcon size={size}>
       <path d="M5.625 1.5c-1.036 0-1.875.84-1.875 1.875v17.25c0 1.035.84 1.875 1.875 1.875h12.75c1.035 0 1.875-.84 1.875-1.875V12.75A3.75 3.75 0 0 0 16.5 9h-1.875a1.875 1.875 0 0 1-1.875-1.875V5.25A3.75 3.75 0 0 0 9 1.5H5.625Z" />
       <path d="M12.971 1.816A5.23 5.23 0 0 1 14.25 5.25v1.875c0 .207.168.375.375.375H16.5a5.23 5.23 0 0 1 3.434 1.279 9.768 9.768 0 0 0-6.963-6.963Z" />
     </BaseIcon>
   );
 }
 
-function ArchiveIcon() {
+function ArchiveIcon({ size }: { size?: number }) {
   return (
-    <BaseIcon>
+    <BaseIcon size={size}>
       <path d="M3.375 3C2.339 3 1.5 3.84 1.5 4.875v.75c0 1.036.84 1.875 1.875 1.875h17.25c1.035 0 1.875-.84 1.875-1.875v-.75C22.5 3.839 21.66 3 20.625 3H3.375Z" />
       <path fillRule="evenodd" d="m3.087 9 .54 9.176A3 3 0 0 0 6.62 21h10.757a3 3 0 0 0 2.995-2.824L20.913 9H3.087Zm6.163 3.75A.75.75 0 0 1 10 12h4a.75.75 0 0 1 0 1.5h-4a.75.75 0 0 1-.75-.75Z" clipRule="evenodd" />
     </BaseIcon>
@@ -254,6 +257,24 @@ function RenameIcon() {
     <BaseIcon>
       <path d="M21.731 2.269a2.625 2.625 0 0 0-3.712 0l-1.157 1.157 3.712 3.712 1.157-1.157a2.625 2.625 0 0 0 0-3.712ZM19.513 8.199l-3.712-3.712-8.4 8.4a5.25 5.25 0 0 0-1.32 2.214l-.8 2.685a.75.75 0 0 0 .933.933l2.685-.8a5.25 5.25 0 0 0 2.214-1.32l8.4-8.4Z" />
       <path d="M5.25 5.25a3 3 0 0 0-3 3v10.5a3 3 0 0 0 3 3h10.5a3 3 0 0 0 3-3V13.5a.75.75 0 0 0-1.5 0v5.25a1.5 1.5 0 0 1-1.5 1.5H5.25a1.5 1.5 0 0 1-1.5-1.5V8.25a1.5 1.5 0 0 1 1.5-1.5h5.25a.75.75 0 0 0 0-1.5H5.25Z" />
+    </BaseIcon>
+  );
+}
+
+function EditIcon() {
+  return (
+    <BaseIcon>
+      <path d="M21.731 2.269a2.625 2.625 0 0 0-3.712 0l-1.157 1.157 3.712 3.712 1.157-1.157a2.625 2.625 0 0 0 0-3.712ZM19.513 8.199l-3.712-3.712-8.4 8.4a5.25 5.25 0 0 0-1.32 2.214l-.8 2.685a.75.75 0 0 0 .933.933l2.685-.8a5.25 5.25 0 0 0 2.214-1.32l8.4-8.4Z" />
+      <path fillRule="evenodd" d="M2.25 20.25a.75.75 0 0 1 .75-.75h18a.75.75 0 0 1 0 1.5H3a.75.75 0 0 1-.75-.75Z" clipRule="evenodd" />
+    </BaseIcon>
+  );
+}
+
+function NewFileIcon() {
+  return (
+    <BaseIcon>
+      <path d="M5.625 1.5c-1.036 0-1.875.84-1.875 1.875v17.25c0 1.035.84 1.875 1.875 1.875h12.75c1.035 0 1.875-.84 1.875-1.875V12.75A3.75 3.75 0 0 0 16.5 9h-1.875a1.875 1.875 0 0 1-1.875-1.875V5.25A3.75 3.75 0 0 0 9 1.5H5.625ZM12.75 12a.75.75 0 0 0-1.5 0v2.25H9a.75.75 0 0 0 0 1.5h2.25V18a.75.75 0 0 0 1.5 0v-2.25H15a.75.75 0 0 0 0-1.5h-2.25V12Z" />
+      <path d="M14.25 5.25a5.23 5.23 0 0 0-1.279-3.434 9.768 9.768 0 0 1 6.963 6.963A5.23 5.23 0 0 0 16.5 7.5h-1.875a.375.375 0 0 1-.375-.375V5.25Z" />
     </BaseIcon>
   );
 }
@@ -323,6 +344,23 @@ function DriveIcon() {
   );
 }
 
+function HistoryIcon() {
+  return (
+    <BaseIcon>
+      <path fillRule="evenodd" d="M12 2.25a9.75 9.75 0 1 0 9.75 9.75.75.75 0 0 0-1.5 0A8.25 8.25 0 1 1 12 3.75c2.3 0 4.36 1.02 5.76 2.63h-2.26a.75.75 0 0 0 0 1.5h3.9a.75.75 0 0 0 .75-.75v-3.9a.75.75 0 0 0-1.5 0v1.96A9.72 9.72 0 0 0 12 2.25Z" clipRule="evenodd" />
+      <path d="M12.75 7.5a.75.75 0 0 0-1.5 0v5.06l3.22 1.86a.75.75 0 1 0 .75-1.3l-2.47-1.43V7.5Z" />
+    </BaseIcon>
+  );
+}
+
+function ExitIcon() {
+  return (
+    <BaseIcon>
+      <path fillRule="evenodd" d="M7.5 3.75A1.5 1.5 0 0 0 6 5.25v13.5a1.5 1.5 0 0 0 1.5 1.5h6a1.5 1.5 0 0 0 1.5-1.5V15a.75.75 0 0 1 1.5 0v3.75a3 3 0 0 1-3 3h-6a3 3 0 0 1-3-3V5.25a3 3 0 0 1 3-3h6a3 3 0 0 1 3 3V9A.75.75 0 0 1 15 9V5.25a1.5 1.5 0 0 0-1.5-1.5h-6Zm10.72 4.72a.75.75 0 0 1 1.06 0l3 3a.75.75 0 0 1 0 1.06l-3 3a.75.75 0 1 1-1.06-1.06l1.72-1.72H9a.75.75 0 0 1 0-1.5h10.94l-1.72-1.72a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
+    </BaseIcon>
+  );
+}
+
 function RootIcon() {
   return (
     <BaseIcon>
@@ -337,6 +375,11 @@ type FileEntry = {
   is_dir: boolean;
   size: number | null;
   modified: number;
+};
+
+type RecentEntry = {
+  name: string;
+  path: string;
 };
 
 type DriveKind = "home" | "root" | "sdcard" | "usb" | "internal";
@@ -418,6 +461,134 @@ function driveLabelFor(drive: DriveEntry): string {
 
 const listDir = callable<[string], { path: string; items: FileEntry[] }>("list_dir");
 const listDrives = callable<[], { drives: DriveEntry[] }>("list_drives");
+/**
+ * Visited folders are tracked here rather than over RPC. The frontend already
+ * knows every folder it opens, and keeping the list local means it cannot come
+ * up empty because of anything on the backend side.
+ */
+const RECENT_STORAGE_KEY = "decky-file-manager:recent-paths";
+const RECENT_LIMIT = 12;
+
+function loadRecentPaths(): string[] {
+  try {
+    const raw = window.localStorage.getItem(RECENT_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((entry) => typeof entry === "string" && entry) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveRecentPaths(paths: string[]): void {
+  try {
+    window.localStorage.setItem(RECENT_STORAGE_KEY, JSON.stringify(paths));
+  } catch {
+    // A full or unavailable store is not worth breaking navigation over.
+  }
+}
+
+/**
+ * The browsing settings outlive the session.
+ *
+ * They live next to the recent folders, in the browser's own store rather than
+ * over RPC: the toolbar has to render with the remembered values on the very
+ * first frame, and a round trip to the backend would show the defaults first
+ * and then visibly correct itself.
+ */
+const PREFERENCES_STORAGE_KEY = "decky-file-manager:preferences";
+
+type ViewMode = "list" | "grid";
+
+type Preferences = {
+  showHidden: boolean;
+  sortOrder: string;
+  fileTypeFilter: string;
+  viewMode: ViewMode;
+  dualPane: boolean;
+};
+
+const DEFAULT_PREFERENCES: Preferences = {
+  showHidden: false,
+  sortOrder: "asc",
+  fileTypeFilter: "all",
+  viewMode: "list",
+  dualPane: false,
+};
+
+/** Every field is checked on the way in: a stale or hand-edited store is not
+ * allowed to put the panel into a state the toolbar cannot show. */
+function loadPreferences(): Preferences {
+  try {
+    const raw = window.localStorage.getItem(PREFERENCES_STORAGE_KEY);
+    if (!raw) return { ...DEFAULT_PREFERENCES };
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return { ...DEFAULT_PREFERENCES };
+    const stored = parsed as Partial<Preferences>;
+    return {
+      showHidden: typeof stored.showHidden === "boolean" ? stored.showHidden : DEFAULT_PREFERENCES.showHidden,
+      sortOrder: stored.sortOrder === "desc" ? "desc" : "asc",
+      fileTypeFilter:
+        stored.fileTypeFilter === "folders" || stored.fileTypeFilter === "files" ? stored.fileTypeFilter : "all",
+      viewMode: stored.viewMode === "grid" ? "grid" : "list",
+      dualPane: typeof stored.dualPane === "boolean" ? stored.dualPane : DEFAULT_PREFERENCES.dualPane,
+    };
+  } catch {
+    return { ...DEFAULT_PREFERENCES };
+  }
+}
+
+function savePreferences(preferences: Preferences): void {
+  try {
+    window.localStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify(preferences));
+  } catch {
+    // As with the recent list: a full or unavailable store is not worth
+    // breaking browsing over.
+  }
+}
+
+function recordRecentPath(path: string): string[] {
+  const next = [path, ...loadRecentPaths().filter((entry) => entry !== path)].slice(0, RECENT_LIMIT);
+  saveRecentPaths(next);
+  return next;
+}
+
+function recentEntriesFrom(paths: string[]): RecentEntry[] {
+  return paths.map((entry) => ({
+    path: entry,
+    name: entry.split("/").filter(Boolean).pop() || entry,
+  }));
+}
+const readTextFile = callable<[string], {
+  path: string;
+  name: string;
+  content: string;
+  encoding: string;
+  size: number;
+  modified: number;
+  read_only: boolean;
+}>("read_text_file");
+const writeTextFile = callable<[string, string, number, string, boolean], {
+  success: boolean;
+  stale?: boolean;
+  path: string;
+  size?: number;
+  modified: number;
+  encoding?: string;
+}>("write_text_file");
+
+/**
+ * Backend exception text is Portuguese by convention; match on it so the
+ * reason a file was refused reads in the user's own language.
+ */
+function backendErrorMessage(e: any, fallbackKey: string): string {
+  const message = String(e?.message ?? t(fallbackKey));
+  const lower = message.toLowerCase();
+  if (lower.includes("permissão")) return t("permission.denied");
+  if (lower.includes("binário")) return t("editor.error_binary");
+  if (lower.includes("grande demais")) return t("editor.error_too_large");
+  return message;
+}
 
 type PaneIndex = 0 | 1;
 
@@ -599,6 +770,176 @@ function DrivesBar({ drives, currentPath, onSelect }: { drives: DriveEntry[]; cu
   );
 }
 
+/**
+ * One entry in the grid view.
+ *
+ * A bare Focusable rather than a ButtonItem: a panel row is full width by
+ * construction and cannot be tiled. Drawing focus is therefore this
+ * component's own job, which is also what the grid needs to be usable from
+ * the couch — the cursor has to be a filled, slightly raised tile rather than
+ * a hairline outline, since a grid gives no other clue about where it sits.
+ * The focused tile also drops its name clamp, so a long filename can be read
+ * without opening anything.
+ */
+function GridTile({
+  item,
+  dual,
+  onOpen,
+  onFocus,
+}: {
+  item: FileEntry;
+  dual: boolean;
+  onOpen: () => void;
+  onFocus: () => void;
+}) {
+  const [focused, setFocused] = useState(false);
+  const iconSize = dual ? 28 : 34;
+
+  return (
+    <Focusable
+      onActivate={onOpen}
+      onClick={onOpen}
+      onFocus={() => {
+        setFocused(true);
+        onFocus();
+      }}
+      onBlur={() => setFocused(false)}
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "flex-start",
+        gap: 8,
+        height: "100%",
+        padding: "12px 6px 10px",
+        boxSizing: "border-box",
+        borderRadius: 6,
+        minWidth: 0,
+        cursor: "pointer",
+        background: focused ? "rgba(120,180,255,0.25)" : "rgba(255,255,255,0.04)",
+        border: `1px solid ${focused ? "rgba(120,180,255,0.9)" : "rgba(255,255,255,0.06)"}`,
+        boxShadow: focused ? "0 0 0 1px rgba(120,180,255,0.4)" : "none",
+        transform: focused ? "scale(1.05)" : "none",
+        transition: "transform 0.1s linear, background 0.1s linear, border-color 0.1s linear",
+      }}
+    >
+      <div style={{ opacity: item.is_dir ? 0.95 : 0.7, display: "flex" }}>
+        {item.is_dir ? (
+          <FolderIcon size={iconSize} />
+        ) : isArchiveFile(item.name) ? (
+          <ArchiveIcon size={iconSize} />
+        ) : (
+          <DocumentIcon size={iconSize} />
+        )}
+      </div>
+      <span
+        style={{
+          width: "100%",
+          fontSize: dual ? 11 : 12,
+          lineHeight: "14px",
+          textAlign: "center",
+          wordBreak: "break-word",
+          overflow: "hidden",
+          display: "-webkit-box",
+          WebkitBoxOrient: "vertical",
+          WebkitLineClamp: focused ? 4 : 2,
+          opacity: 0.95,
+        }}
+      >
+        {item.name}
+      </span>
+    </Focusable>
+  );
+}
+
+/**
+ * One control in the browsing toolbar.
+ *
+ * The panel's own ToggleField and DropdownItem were never meant to sit side by
+ * side: each lays its label out on the row it is given, so five of them across
+ * the top came out at two different heights, and the dropdowns were left too
+ * narrow to read the option that was actually selected. This stacks the label
+ * above the value instead — every control the same size, and the value on a
+ * line of its own, where it fits.
+ *
+ * Activating cycles to the next option rather than opening a menu. With two or
+ * three options each that is fewer presses than a dropdown, and the chosen
+ * value stays on screen instead of hiding behind a popup.
+ */
+function ToolbarControl({
+  label,
+  value,
+  active,
+  onActivate,
+}: {
+  label: string;
+  value: string;
+  /** A setting that is currently changing what the list shows, tinted so a
+   * glance across the row finds it. */
+  active?: boolean;
+  onActivate: () => void;
+}) {
+  const [focused, setFocused] = useState(false);
+
+  return (
+    <Focusable
+      onActivate={onActivate}
+      onClick={onActivate}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
+      style={{
+        flex: "1 1 0%",
+        minWidth: 0,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "flex-start",
+        justifyContent: "center",
+        gap: 2,
+        padding: "5px 10px",
+        borderRadius: 4,
+        boxSizing: "border-box",
+        cursor: "pointer",
+        background: focused
+          ? "rgba(120,180,255,0.28)"
+          : active
+            ? "rgba(120,180,255,0.10)"
+            : "rgba(255,255,255,0.05)",
+        border: `1px solid ${focused ? "rgba(120,180,255,0.9)" : active ? "rgba(120,180,255,0.35)" : "rgba(255,255,255,0.08)"}`,
+        transition: "background 0.1s linear, border-color 0.1s linear",
+      }}
+    >
+      <span
+        style={{
+          maxWidth: "100%",
+          fontSize: 10,
+          lineHeight: "12px",
+          letterSpacing: "0.08em",
+          textTransform: "uppercase",
+          opacity: focused ? 0.9 : 0.55,
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+        }}
+      >
+        {label}
+      </span>
+      <span
+        style={{
+          maxWidth: "100%",
+          fontSize: 13,
+          lineHeight: "17px",
+          fontWeight: 600,
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+        }}
+      >
+        {value}
+      </span>
+    </Focusable>
+  );
+}
+
 type PaneViewProps = {
   pane: PaneApi;
   dual: boolean;
@@ -606,6 +947,7 @@ type PaneViewProps = {
   showHidden: boolean;
   sortOrder: string;
   fileTypeFilter: string;
+  viewMode: ViewMode;
   onPaneFocus: (index: PaneIndex) => void;
   onOpenDir: (pane: PaneApi, item: FileEntry) => void;
   registerContainer: (index: PaneIndex, element: HTMLDivElement | null) => void;
@@ -618,15 +960,37 @@ function PaneView({
   showHidden,
   sortOrder,
   fileTypeFilter,
+  viewMode,
   onPaneFocus,
   onOpenDir,
   registerContainer,
 }: PaneViewProps) {
   const [visibleItemCount, setVisibleItemCount] = useState(150);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  // A listing the panel has not scrolled to the top of yet.
+  const pendingScrollReset = useRef(true);
 
   useEffect(() => {
     setVisibleItemCount(150);
-  }, [pane.path, showHidden, sortOrder, fileTypeFilter]);
+    pendingScrollReset.current = true;
+  }, [pane.path, showHidden, sortOrder, fileTypeFilter, viewMode]);
+
+  /**
+   * A new listing starts at its own top.
+   *
+   * Keeping the previous offset meant opening a folder from halfway down a
+   * long one left its first entries above the fold, and turning hidden files
+   * on shifted everything under the cursor. The reset waits for the rows
+   * themselves: the listing arrives a beat after the path changes, and
+   * scrolling a container that still holds the old (or no) content does
+   * nothing.
+   */
+  useLayoutEffect(() => {
+    if (!pendingScrollReset.current || pane.loading) return;
+    pendingScrollReset.current = false;
+    const scroller = scrollRef.current;
+    if (scroller) scroller.scrollTop = 0;
+  }, [pane.loading, pane.items]);
 
   const filteredItems = useMemo(() => {
     let filtered = pane.items;
@@ -654,6 +1018,48 @@ function PaneView({
     if (pane.loading) return <PanelSectionRow>{t("action.loading")}</PanelSectionRow>;
     if (pane.error) return <PanelSectionRow>{pane.error}</PanelSectionRow>;
     if (!filteredItems.length) return <PanelSectionRow>{t("panel.empty")}</PanelSectionRow>;
+
+    const showMore = hasMoreItems ? (
+      <PanelSectionRow>
+        <ButtonItem onClick={() => setVisibleItemCount((count) => count + 150)}>
+          {t("action.show_more").replace("{count}", String(filteredItems.length - visibleItems.length))}
+        </ButtonItem>
+      </PanelSectionRow>
+    ) : null;
+
+    if (viewMode === "grid") {
+      return (
+        <>
+          <Focusable
+            flow-children="grid"
+            style={{
+              display: "grid",
+              gridTemplateColumns: `repeat(auto-fill, minmax(${dual ? 92 : 116}px, 1fr))`,
+              gap: 8,
+              padding: "2px 2px 8px",
+            }}
+          >
+            {visibleItems.map((item) => (
+              // The path lives on a wrapper here, the same as in the list, so
+              // the focus-restore and context-menu lookups keep finding a
+              // focusable *inside* what they matched.
+              <div key={item.path} data-item-path={item.path} data-pane-index={pane.index} style={{ minWidth: 0 }}>
+                <GridTile
+                  item={item}
+                  dual={dual}
+                  onOpen={() => onOpenDir(pane, item)}
+                  onFocus={() => {
+                    pane.setFocusPath(item.path);
+                    onPaneFocus(pane.index);
+                  }}
+                />
+              </div>
+            ))}
+          </Focusable>
+          {showMore}
+        </>
+      );
+    }
 
     return (
       <Focusable navEntryPreferPosition={NavEntryPositionPreferences.MAINTAIN_Y}>
@@ -689,13 +1095,7 @@ function PaneView({
             </PanelSectionRow>
           </div>
         ))}
-        {hasMoreItems ? (
-          <PanelSectionRow>
-            <ButtonItem onClick={() => setVisibleItemCount((count) => count + 150)}>
-              {t("action.show_more").replace("{count}", String(filteredItems.length - visibleItems.length))}
-            </ButtonItem>
-          </PanelSectionRow>
-        ) : null}
+        {showMore}
       </Focusable>
     );
   })();
@@ -763,6 +1163,7 @@ function PaneView({
             setVisibleItemCount((count) => Math.min(count + 150, filteredItems.length));
           }
         }}
+        ref={scrollRef}
         style={{ flex: 1, minHeight: 0, overflowY: "auto", paddingBottom: 48, boxSizing: "border-box" }}
       >
         <PanelSection title={dual ? undefined : t("panel.files")}>{rows}</PanelSection>
@@ -772,11 +1173,367 @@ function PaneView({
   );
 }
 
+type EditorBuffer = {
+  path: string;
+  name: string;
+  content: string;
+  original: string;
+  encoding: string;
+  modified: number;
+  readOnly: boolean;
+};
+
+const EDITOR_MONOSPACE = { fontFamily: "Consolas, 'Courier New', monospace", fontSize: 13, lineHeight: "18px" } as const;
+const EDITOR_GUTTER = { opacity: 0.3, minWidth: 34, textAlign: "right", flexShrink: 0, userSelect: "none" } as const;
+
+/**
+ * One line of the file.
+ *
+ * Deliberately not a ButtonItem: a panel row per line turned the file into a
+ * form and put about eight lines on screen. This is a bare focusable row at
+ * the text's own height, so the file reads as a document while still being
+ * something the D-pad can walk down. The line under the cursor drops its
+ * truncation so a long line can be read in full.
+ */
+const EditorLine = forwardRef<HTMLDivElement, {
+  index: number;
+  text: string;
+  editing: boolean;
+  onStart: () => void;
+}>(function EditorLine({ index, text, editing, onStart }, ref) {
+  const [focused, setFocused] = useState(false);
+  const expanded = focused || editing;
+
+  return (
+    <Focusable
+      ref={ref}
+      onActivate={onStart}
+      onClick={onStart}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
+      style={{
+        display: "flex",
+        gap: 10,
+        minWidth: 0,
+        padding: "0 6px",
+        borderRadius: 2,
+        background: editing ? "rgba(103,193,245,0.22)" : focused ? "rgba(255,255,255,0.1)" : "transparent",
+        ...EDITOR_MONOSPACE,
+      }}
+    >
+      <span style={EDITOR_GUTTER}>{index + 1}</span>
+      <span
+        style={
+          expanded
+            ? { minWidth: 0, whiteSpace: "pre-wrap", wordBreak: "break-all" }
+            : { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }
+        }
+      >
+        {text.length ? text : " "}
+      </span>
+    </Focusable>
+  );
+});
+
+/**
+ * A question the editor cannot carry on past: unsaved changes on the way out,
+ * or the file having changed on disk under an edit.
+ *
+ * It takes the editor over rather than sitting as a banner above the file.
+ * As a banner it was only reachable by walking the D-pad back up through every
+ * line of the document — the question is modal, so the screen is too, nothing
+ * else is focusable while it is up, and the answer that loses no work is
+ * focused as it appears.
+ */
+function EditorConfirm({
+  title,
+  message,
+  tone,
+  actions,
+}: {
+  title: string;
+  message: string;
+  tone: "danger" | "warning";
+  actions: Array<{ label: string; onSelect: () => void; primary?: boolean }>;
+}) {
+  const primaryRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    // A beat after the commit, the same as the page's other modals: Steam
+    // settles its own focus on the way in and focusing sooner loses to it.
+    const timer = window.setTimeout(() => {
+      try {
+        primaryRef.current?.focus();
+      } catch {
+      }
+    }, 50);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  const accent = tone === "danger" ? "rgba(220,80,80," : "rgba(230,170,60,";
+
+  return (
+    <div style={{ flex: 1, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: "12px 0" }}>
+      <div style={{ width: "100%", maxWidth: 560, padding: 16, borderRadius: 6, background: `${accent}0.12)`, border: `1px solid ${accent}0.45)` }}>
+        <h2 style={{ margin: "0 0 8px", fontSize: 17 }}>{title}</h2>
+        <div style={{ fontSize: 13, opacity: 0.8, marginBottom: 16 }}>{message}</div>
+        <Focusable
+          style={{ display: "flex", flexDirection: "column", gap: 8 }}
+          navEntryPreferPosition={NavEntryPositionPreferences.MAINTAIN_X}
+        >
+          {actions.map((action) => (
+            <DialogButton
+              key={action.label}
+              ref={(action.primary ? primaryRef : undefined) as any}
+              onClick={action.onSelect}
+            >
+              {action.label}
+            </DialogButton>
+          ))}
+        </Focusable>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The file editor, rendered inline on the page in place of the file list.
+ *
+ * Not a modal on purpose. A dialog only joins Steam's gamepad navigation when
+ * its modal manager mounts it, and that could not be made to work here — the
+ * editor was reachable by touch at best. The page is navigable, so the editor
+ * lives on it and uses the same components as the file list.
+ *
+ * The file is always on screen, whole. Picking a line opens a field for it
+ * underneath — Steam's own TextField, which is what raises the SteamOS
+ * keyboard — while the document stays visible above with that line marked in
+ * place, and ▲/▼ carry the field to the next line without closing it.
+ */
+function EditorView({
+  buffer,
+  loading,
+  saving,
+  saved,
+  error,
+  stale,
+  discardPrompt,
+  editingLine,
+  editingValue,
+  visibleLines,
+  onEditingText,
+  onStartLine,
+  onMoveLine,
+  onSplitLine,
+  onApplyLine,
+  onCancelLine,
+  onClearLine,
+  onInsertLine,
+  onDeleteLine,
+  onShowMore,
+  onSave,
+  onReload,
+  onKeepEditing,
+  onDiscard,
+  onClose,
+}: {
+  buffer: EditorBuffer;
+  loading: boolean;
+  saving: boolean;
+  saved: boolean;
+  error: string | null;
+  stale: boolean;
+  discardPrompt: boolean;
+  editingLine: number | null;
+  editingValue: string;
+  visibleLines: number;
+  onEditingText: (value: string, caret: number) => void;
+  onStartLine: (index: number) => void;
+  onMoveLine: (delta: number) => void;
+  onSplitLine: () => void;
+  onApplyLine: () => void;
+  onCancelLine: () => void;
+  onClearLine: () => void;
+  onInsertLine: (index: number) => void;
+  onDeleteLine: (index: number) => void;
+  onShowMore: () => void;
+  onSave: (force: boolean, closeAfter?: boolean) => void;
+  onReload: () => void;
+  onKeepEditing: () => void;
+  onDiscard: () => void;
+  onClose: () => void;
+}) {
+  const lines = useMemo(() => buffer.content.split("\n"), [buffer.content]);
+  const dirty = buffer.content !== buffer.original;
+  const editing = editingLine !== null;
+
+  // Keep the line being typed in view as ▲/▼ walk the field down the file.
+  const editingRowRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (editingLine === null) return;
+    try {
+      editingRowRef.current?.scrollIntoView({ block: "nearest" });
+    } catch {
+      // Older webviews without the options argument; not worth failing over.
+    }
+  }, [editingLine]);
+
+  // Answered on a screen of its own, below, rather than in a banner over the
+  // file. Unsaved changes win over a stale file: the way out is the question.
+  const confirm = discardPrompt
+    ? {
+        tone: "danger" as const,
+        title: t("editor.discard_title"),
+        message: t("editor.discard_message").replace("{name}", buffer.name),
+        actions: [
+          { label: t("editor.save_and_close"), onSelect: () => onSave(false, true), primary: true },
+          { label: t("editor.discard"), onSelect: onDiscard },
+          { label: t("editor.keep_editing"), onSelect: onKeepEditing },
+        ],
+      }
+    : stale
+      ? {
+          tone: "warning" as const,
+          title: t("editor.stale_title"),
+          message: t("editor.stale_message").replace("{name}", buffer.name),
+          actions: [
+            { label: t("editor.overwrite"), onSelect: () => onSave(true), primary: true },
+            { label: t("editor.reload"), onSelect: onReload },
+            { label: t("editor.keep_editing"), onSelect: onKeepEditing },
+          ],
+        }
+      : null;
+
+  const status = buffer.readOnly
+    ? t("editor.read_only")
+    : loading
+      ? t("editor.loading")
+      : dirty
+        ? t("editor.unsaved")
+        : saved
+          ? t("editor.saved")
+          : buffer.encoding;
+
+  const actionStyle = { flex: 1, minWidth: 0, fontSize: 13, padding: "6px 0" } as const;
+
+  return (
+    <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", minWidth: 0 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 10, padding: "2px 0 8px", minWidth: 0 }}>
+        <h1 style={{ margin: 0, fontSize: 20, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{buffer.name}</h1>
+        <span style={{ fontSize: 12, opacity: 0.55, flexShrink: 0 }}>{status}</span>
+        <span style={{ fontSize: 12, opacity: 0.4, flexShrink: 0, marginLeft: "auto" }}>
+          {editing
+            ? t("editor.line_of").replace("{number}", String(editingLine + 1)).replace("{count}", String(lines.length))
+            : t("editor.lines").replace("{count}", String(lines.length))}
+        </span>
+      </div>
+
+      {error ? (
+        <div style={{ margin: "0 0 8px", padding: "6px 10px", borderRadius: 4, fontSize: 12, background: "rgba(220,80,80,0.15)", border: "1px solid rgba(220,80,80,0.4)" }}>
+          {error}
+        </div>
+      ) : null}
+
+      {confirm ? (
+        <EditorConfirm title={confirm.title} message={confirm.message} tone={confirm.tone} actions={confirm.actions} />
+      ) : (
+        <>
+      <div style={{ fontSize: 11, opacity: 0.5, padding: "0 2px 6px" }}>
+        {loading ? t("editor.loading") : editing ? t("editor.edit_hint") : t("editor.hint")}
+      </div>
+
+      {/* The file itself, always on screen — including while a line is being
+          typed, so the edit is made in view of its surroundings. */}
+      <div style={{ flex: 1, minHeight: 0, overflowY: "auto", minWidth: 0, padding: "4px 0", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 4, background: "rgba(0,0,0,0.3)" }}>
+        <Focusable navEntryPreferPosition={NavEntryPositionPreferences.MAINTAIN_Y}>
+          {lines.slice(0, visibleLines).map((line, index) => (
+            <EditorLine
+              key={index}
+              ref={index === editingLine ? editingRowRef : undefined}
+              index={index}
+              text={index === editingLine ? editingValue : line}
+              editing={index === editingLine}
+              onStart={() => onStartLine(index)}
+            />
+          ))}
+
+          {lines.length > visibleLines ? (
+            <div style={{ padding: "6px 6px 2px" }}>
+              <DialogButton style={{ padding: "6px 0", fontSize: 13 }} onClick={onShowMore}>
+                {t("action.show_more").replace("{count}", String(lines.length - visibleLines))}
+              </DialogButton>
+            </div>
+          ) : null}
+        </Focusable>
+      </div>
+
+      {editing ? (
+        <div style={{ paddingTop: 8, minWidth: 0 }}>
+          {/* Steam's own field: focusing it is what brings up the SteamOS
+              keyboard, so it is focused as soon as a line is picked. */}
+          <div data-line-input style={{ paddingBottom: 6, minWidth: 0 }}>
+            <TextField
+              focusOnMount
+              value={editingValue}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                onEditingText(e.currentTarget.value, e.currentTarget.selectionStart ?? e.currentTarget.value.length)
+              }
+              onSelect={(e: React.SyntheticEvent<HTMLInputElement>) =>
+                onEditingText(e.currentTarget.value, e.currentTarget.selectionStart ?? e.currentTarget.value.length)
+              }
+              bShowCopyAction={false}
+            />
+          </div>
+
+          <Focusable style={{ display: "flex", gap: 6 }}>
+            <DialogButton style={actionStyle} onClick={onApplyLine}>{t("editor.done")}</DialogButton>
+            <DialogButton style={actionStyle} onClick={onCancelLine}>{t("action.cancel")}</DialogButton>
+            {/* Carry the field to the next line without closing it. */}
+            <DialogButton style={actionStyle} disabled={editingLine === 0} onClick={() => onMoveLine(-1)}>{"▲"}</DialogButton>
+            <DialogButton style={actionStyle} disabled={editingLine >= lines.length - 1} onClick={() => onMoveLine(1)}>{"▼"}</DialogButton>
+          </Focusable>
+
+          <Focusable style={{ display: "flex", gap: 6, paddingTop: 6, paddingBottom: 8 }}>
+            <DialogButton style={actionStyle} onClick={() => onInsertLine(editingLine)}>{t("editor.insert_line")}</DialogButton>
+            <DialogButton style={actionStyle} onClick={onSplitLine}>{t("editor.split_line")}</DialogButton>
+            <DialogButton style={actionStyle} onClick={() => onDeleteLine(editingLine)}>{t("editor.delete_line")}</DialogButton>
+            <DialogButton style={actionStyle} onClick={onClearLine}>{t("editor.clear_line")}</DialogButton>
+          </Focusable>
+        </div>
+      ) : (
+        <>
+          <div style={{ fontSize: 11, opacity: 0.5, padding: "6px 2px", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", direction: "rtl", textAlign: "left" }}>
+            {buffer.path}
+          </div>
+
+          <Focusable style={{ display: "flex", gap: 8, paddingBottom: 8 }}>
+            <DialogButton
+              style={{ flex: 1 }}
+              disabled={buffer.readOnly || loading || saving || !dirty}
+              onClick={() => onSave(false)}
+            >
+              {saving ? t("editor.saving") : t("action.save")}
+            </DialogButton>
+            <DialogButton style={{ flex: 1 }} onClick={onClose}>{t("action.close")}</DialogButton>
+          </Focusable>
+        </>
+      )}
+        </>
+      )}
+    </div>
+  );
+}
+
 const GAMEPAD_BUTTON_B = 1;
 const GAMEPAD_BUTTON_X = 2;
 const GAMEPAD_BUTTON_Y = 3;
 const GAMEPAD_BUTTON_LSHOULDER = 30;
 const GAMEPAD_BUTTON_RSHOULDER = 31;
+// A tap on B walks up one directory, so leaving from a deep path used to mean
+// one press per level. Holding B long enough to be deliberate exits outright.
+const EXIT_HOLD_MS = 800;
+// How long after a modal closes a B press still counts as "that was the
+// dismissal", rather than a fresh request to walk up a directory.
+const OVERLAY_GRACE_MS = 400;
 
 function FileManagerPage() {
   const paneA = usePane(0, "/home/deck");
@@ -784,7 +1541,11 @@ function FileManagerPage() {
   const panesRef = useRef<[PaneApi, PaneApi]>([paneA, paneB]);
   panesRef.current = [paneA, paneB];
 
-  const [dualPane, setDualPane] = useState(false);
+  // Read once, on the first render, so the toolbar comes up already showing
+  // what was left set last time instead of correcting itself a frame later.
+  const storedPreferences = useRef(loadPreferences());
+
+  const [dualPane, setDualPane] = useState(storedPreferences.current.dualPane);
   const dualPaneRef = useRef(false);
   // Mirror the rendered state every render. Maintaining this ref by hand
   // inside the setter let it drift out of sync with what is on screen.
@@ -797,11 +1558,19 @@ function FileManagerPage() {
   const activePane = activePaneIndex === 0 ? paneA : paneB;
 
   const [drives, setDrives] = useState<DriveEntry[]>([]);
-  const [showHidden, setShowHidden] = useState(false);
-  const [sortOrder, setSortOrder] = useState("asc");
-  const [fileTypeFilter, setFileTypeFilter] = useState("all");
+  const [showHidden, setShowHidden] = useState(storedPreferences.current.showHidden);
+  const [sortOrder, setSortOrder] = useState(storedPreferences.current.sortOrder);
+  const [fileTypeFilter, setFileTypeFilter] = useState(storedPreferences.current.fileTypeFilter);
+  const [viewMode, setViewMode] = useState<ViewMode>(storedPreferences.current.viewMode);
+
+  useEffect(() => {
+    savePreferences({ showHidden, sortOrder, fileTypeFilter, viewMode, dualPane });
+  }, [showHidden, sortOrder, fileTypeFilter, viewMode, dualPane]);
 
   const backTimeout = useRef<number | null>(null);
+  const exitHoldFrame = useRef<number | null>(null);
+  const [exitHoldActive, setExitHoldActive] = useState(false);
+  const [exitHoldFilled, setExitHoldFilled] = useState(false);
   const isLongBack = useRef(false);
   const backPressed = useRef(false);
   const backHadOverlayOnPress = useRef(false);
@@ -911,7 +1680,7 @@ function FileManagerPage() {
    * actually holds focus counts.
    */
   const isShortcutBlocked = useCallback(() => {
-    if (hasActiveModalRef.current) return true;
+    if (hasActiveModalRef.current || editorOpenRef.current) return true;
     if (typeof document === "undefined") return false;
 
     const active = document.activeElement as HTMLElement | null;
@@ -940,11 +1709,44 @@ function FileManagerPage() {
     }
   }, []);
 
+  // Progress feedback for the exit hold. Without it the hold is invisible and
+  // people keep tapping B, which just walks them up one directory at a time.
+  const beginExitHold = useCallback(() => {
+    setExitHoldActive(true);
+    setExitHoldFilled(false);
+    if (exitHoldFrame.current !== null) {
+      window.cancelAnimationFrame(exitHoldFrame.current);
+    }
+    // The bar fills through a CSS transition, so the filled width has to land
+    // on a later frame than the mount or it snaps straight to the end state.
+    exitHoldFrame.current = window.requestAnimationFrame(() => {
+      exitHoldFrame.current = window.requestAnimationFrame(() => {
+        exitHoldFrame.current = null;
+        setExitHoldFilled(true);
+      });
+    });
+  }, []);
+
+  const endExitHold = useCallback(() => {
+    if (exitHoldFrame.current !== null) {
+      window.cancelAnimationFrame(exitHoldFrame.current);
+      exitHoldFrame.current = null;
+    }
+    setExitHoldActive(false);
+    setExitHoldFilled(false);
+  }, []);
+
+  // The editor takes over the page, so the browser's own shortcuts have to
+  // stand down while it is up.
+  const editorOpenRef = useRef(false);
+
   const openContextMenuRef = useRef<(item: FileEntry | null) => void>(() => null);
   const getCurrentFocusedItemRef = useRef<() => FileEntry | null>(() => null);
   const goBackRef = useRef<() => void>(() => null);
   const exitPluginRef = useRef<() => void>(() => null);
   const toggleDualPaneRef = useRef<() => void>(() => null);
+
+  const editorBackRef = useRef<() => void>(() => null);
 
   const exitPlugin = useCallback(() => {
     Router.CloseSideMenus();
@@ -955,6 +1757,10 @@ function FileManagerPage() {
   }, []);
 
   const goBack = useCallback(() => {
+    if (editorOpenRef.current) {
+      editorBackRef.current();
+      return;
+    }
     const pane = panesRef.current[activePaneIndexRef.current];
     pane.setError(null);
     if (!pane.goUp()) {
@@ -971,6 +1777,18 @@ function FileManagerPage() {
       setDrives([]);
     }
   }, []);
+
+  const refreshRecent = useCallback(async () => {
+    setRecentPaths(recentEntriesFrom(loadRecentPaths()));
+  }, []);
+
+  const goToRecent = useCallback((entry: RecentEntry) => {
+    const pane = panesRef.current[activePaneIndexRef.current];
+    pane.setError(null);
+    void pane.loadPath(entry.path, t("error.directory_not_found"));
+  }, []);
+
+  const [recentPaths, setRecentPaths] = useState<RecentEntry[]>([]);
 
   const initialLoadDone = useRef(false);
 
@@ -992,7 +1810,9 @@ function FileManagerPage() {
     if (initialLoadDone.current) return;
     initialLoadDone.current = true;
     const [first] = panesRef.current;
-    void first.loadPath(first.pathRef.current);
+    // A folder asked for from the Steam library menu is answered by the effect
+    // further down; loading the default folder as well would only flash it.
+    if (!hasPendingBrowse()) void first.loadPath(first.pathRef.current);
     void refreshDrives();
   }, [refreshDrives]);
 
@@ -1022,6 +1842,41 @@ function FileManagerPage() {
     void pane.loadPath(drive.path, t("error.directory_not_found"));
   }, []);
 
+  const getGameFolders = callable<[string], { install: string | null; compat: string | null; name: string | null }>("get_game_folders");
+
+  /**
+   * Open the panel at one of a game's folders, asked for from the Steam
+   * library context menu. The folders are resolved on the backend, off the
+   * app id alone; a game that has neither — never launched, so no Proton
+   * prefix — says so in the panel rather than silently doing nothing.
+   */
+  const openBrowseRequest = useCallback(async (request: BrowseRequest) => {
+    const pane = panesRef.current[activePaneIndexRef.current];
+    try {
+      const folders = await getGameFolders(request.appid);
+      const target = request.kind === "compat" ? folders.compat : folders.install;
+      if (target) {
+        await pane.loadPath(target, t("error.directory_not_found"), false, null);
+        return;
+      }
+      await pane.loadPath(pane.pathRef.current, undefined, false, null);
+      pane.setError(t(request.kind === "compat" ? "error.compatdata_not_found" : "error.install_folder_not_found"));
+    } catch (e) {
+      await pane.loadPath(pane.pathRef.current, undefined, false, null);
+      pane.setError(backendErrorMessage(e, "error.could_not_load_directory"));
+    }
+  }, []);
+
+  // Taken on mount for a menu pick that opened the page, and delivered live
+  // for one made while it was already open.
+  useEffect(() => {
+    const requested = takePendingBrowse();
+    if (requested) void openBrowseRequest(requested);
+    return subscribeBrowse((request) => {
+      void openBrowseRequest(request);
+    });
+  }, [openBrowseRequest]);
+
   const hasClipboard = callable<[], { has: boolean }>("has_clipboard");
   const copyPath = callable<[string], { ok: boolean }>("copy_path");
   const cutPath = callable<[string], { ok: boolean }>("cut_path");
@@ -1042,6 +1897,7 @@ function FileManagerPage() {
     permissions: string;
   }>("get_properties");
   const getDirectorySize = callable<[string], { size: number | null; path: string }>("get_directory_size");
+  const createFileCallable = callable<[string, string], { success: boolean; path?: string; new_path?: string }>("create_file");
 
   const [clipboardHas, setClipboardHas] = useState(false);
   const [error, setErrorState] = useState<string | null>(null);
@@ -1094,13 +1950,66 @@ function FileManagerPage() {
   const conflictPrimaryRef = useRef<HTMLButtonElement | null>(null);
   const permissionPrimaryRef = useRef<HTMLButtonElement | null>(null);
 
+  const [editorBuffer, setEditorBuffer] = useState<EditorBuffer | null>(null);
+  const [editorLoading, setEditorLoading] = useState(false);
+  const [editorSaving, setEditorSaving] = useState(false);
+  const [editorSaved, setEditorSaved] = useState(false);
+  const [editorError, setEditorError] = useState<string | null>(null);
+  const [editorStale, setEditorStale] = useState(false);
+  const [editorDiscardPrompt, setEditorDiscardPrompt] = useState(false);
+  const [editingLine, setEditingLine] = useState<number | null>(null);
+  const [editingValue, setEditingValue] = useState("");
+  // Where the next character goes. Typing used to only ever append, which made
+  // fixing anything but the end of a line a matter of deleting back to it.
+  const [editingCaret, setEditingCaret] = useState(0);
+  const [visibleLines, setVisibleLines] = useState(150);
+
+  // Read by the controller handler and the state updaters, which must not
+  // close over a render's worth of stale editor state.
+  const editorBufferRef = useRef<EditorBuffer | null>(null);
+  editorBufferRef.current = editorBuffer;
+  const editingLineRef = useRef<number | null>(null);
+  editingLineRef.current = editingLine;
+  const editingValueRef = useRef("");
+  editingValueRef.current = editingValue;
+  const editingCaretRef = useRef(0);
+  editingCaretRef.current = editingCaret;
+  const editorDiscardPromptRef = useRef(false);
+  editorDiscardPromptRef.current = editorDiscardPrompt;
+  const editorStaleRef = useRef(false);
+  editorStaleRef.current = editorStale;
+  const editorSavingRef = useRef(false);
+  editorOpenRef.current = editorBuffer !== null;
+
   const [createFolderRequested, setCreateFolderRequested] = useState(false);
   const [createFolderName, setCreateFolderName] = useState("");
   const createFolderRef = useRef<HTMLDivElement | null>(null);
   const createFolderConfirmRef = useRef<HTMLButtonElement | null>(null);
+  const [createFileRequested, setCreateFileRequested] = useState(false);
+  const [createFileName, setCreateFileName] = useState("");
+  const createFileRef = useRef<HTMLDivElement | null>(null);
+  const createFileConfirmRef = useRef<HTMLButtonElement | null>(null);
   const fileManagerScopeRef = useRef<HTMLDivElement | null>(null);
-  const hasActiveModal = renameRequested || deleteRequested || propertiesRequested || createFolderRequested || !!conflictModal || !!operationModal || !!permissionModal;
+  const hasActiveModal = renameRequested || deleteRequested || propertiesRequested || createFolderRequested || createFileRequested || !!conflictModal || !!operationModal || !!permissionModal;
   hasActiveModalRef.current = hasActiveModal;
+
+  // Steam dismisses a modal on the B *press*, through the Focusable's own
+  // cancel handling, and our listener sees the *release* afterwards. By then
+  // the modal is gone, so the release used to fall through to "go up one
+  // directory" — closing the editor and leaving the folder in one press.
+  // Recording when the overlay went away arms the grace window below.
+  const overlayWasOpenRef = useRef(false);
+
+  useEffect(() => {
+    if (hasActiveModal) {
+      overlayWasOpenRef.current = true;
+      return;
+    }
+    if (overlayWasOpenRef.current) {
+      overlayWasOpenRef.current = false;
+      lastOverlayRemovedAt.current = Date.now();
+    }
+  }, [hasActiveModal]);
 
   const isDropdownMenuOpenInDom = useCallback(() => {
     if (typeof document === "undefined") return false;
@@ -1236,8 +2145,8 @@ function FileManagerPage() {
       }
     }
 
-    return propertiesRequested || renameRequested || deleteRequested || createFolderRequested || !!conflictModal || !!operationModal || !!permissionModal;
-  }, [propertiesRequested, renameRequested, deleteRequested, createFolderRequested, conflictModal, operationModal, permissionModal]);
+    return propertiesRequested || renameRequested || deleteRequested || createFolderRequested || createFileRequested || !!conflictModal || !!operationModal || !!permissionModal;
+  }, [propertiesRequested, renameRequested, deleteRequested, createFolderRequested, createFileRequested, conflictModal, operationModal, permissionModal]);
 
   useEffect(() => {
     const input = (window as any).SteamClient?.Input;
@@ -1249,6 +2158,9 @@ function FileManagerPage() {
           if (!isPluginActive.current) return;
 
           if (gamepadButton === GAMEPAD_BUTTON_Y && isPressed) {
+            // The options menu belongs to the file list; opening it over a
+            // modal buries the modal under a menu about the file behind it.
+            if (hasActiveModalRef.current || editorOpenRef.current) return;
             const item = getCurrentFocusedItemRef.current();
             openContextMenuRef.current(item);
             return;
@@ -1282,7 +2194,10 @@ function FileManagerPage() {
 
             const activeElement = document.activeElement as HTMLElement | null;
             const pathInputWasRecentlyFocused = Date.now() - pathInputLastFocusRef.current < 3000;
-            if (pathInputFocusedRef.current || pathInputWasRecentlyFocused || (activeElement instanceof HTMLElement && activeElement.closest("[data-path-input]"))) {
+            // While a modal is up the path field is inert and cannot hold
+            // focus, so blurring it would only swallow the press that is
+            // meant to dismiss the modal.
+            if (!hasActiveModalRef.current && (pathInputFocusedRef.current || pathInputWasRecentlyFocused || (activeElement instanceof HTMLElement && activeElement.closest("[data-path-input]")))) {
               pathInputFocusedRef.current = false;
               pathInputLastFocusRef.current = 0;
               if (pathInputBlurTimerRef.current !== null) {
@@ -1293,7 +2208,7 @@ function FileManagerPage() {
               return;
             }
 
-            const hasOverlay = isAnyModalOrMenuOpen();
+            const hasOverlay = hasActiveModalRef.current || isAnyModalOrMenuOpen();
             const dropdownMenuOpen = isDropdownMenuOpenInDom();
             const shouldConsumeBack = hasOverlay || dropdownMenuOpen || Boolean(activeElement?.closest("[role='menu'], [role='dialog'], [data-modal-root], [data-decky-modal], [aria-expanded='true'], [aria-haspopup], .contextMenu, .contextMenuContents, .BasicContextMenuModal"));
 
@@ -1360,10 +2275,19 @@ function FileManagerPage() {
             if (backTimeout.current) {
               window.clearTimeout(backTimeout.current);
             }
+            // A press that only just dismissed a modal must not start the
+            // hold-to-exit timer either.
+            if (lastOverlayRemovedAt.current && Date.now() - lastOverlayRemovedAt.current < OVERLAY_GRACE_MS) {
+              backConsumedOnPress.current = true;
+              return;
+            }
+            beginExitHold();
             backTimeout.current = window.setTimeout(() => {
               isLongBack.current = true;
+              backTimeout.current = null;
+              endExitHold();
               exitPluginRef.current();
-            }, 200);
+            }, EXIT_HOLD_MS);
           } else {
             if (!backPressed.current) return;
             backPressed.current = false;
@@ -1371,11 +2295,12 @@ function FileManagerPage() {
               window.clearTimeout(backTimeout.current);
               backTimeout.current = null;
             }
+            endExitHold();
             const now = Date.now();
             if (
               backHadOverlayOnPress.current ||
               backConsumedOnPress.current ||
-              (lastOverlayRemovedAt.current && now - lastOverlayRemovedAt.current < 400)
+              (lastOverlayRemovedAt.current && now - lastOverlayRemovedAt.current < OVERLAY_GRACE_MS)
             ) {
               backHadOverlayOnPress.current = false;
               backConsumedOnPress.current = false;
@@ -1396,13 +2321,14 @@ function FileManagerPage() {
         window.clearTimeout(backTimeout.current);
         backTimeout.current = null;
       }
+      endExitHold();
       if (typeof unregister === "function") {
         unregister();
       } else if (unregister?.Unregister) {
         unregister.Unregister();
       }
     };
-  }, [isAnyModalOrMenuOpen, isDropdownMenuOpenInDom, isShortcutBlocked, leavePathInput]);
+  }, [beginExitHold, endExitHold, isAnyModalOrMenuOpen, isDropdownMenuOpenInDom, isShortcutBlocked, leavePathInput]);
 
   useEffect(() => {
     if (renameRequested) {
@@ -1434,6 +2360,18 @@ function FileManagerPage() {
       }, 50);
     }
   }, [deleteRequested]);
+
+  useEffect(() => {
+    if (createFileRequested) {
+      setTimeout(() => {
+        const input = createFileRef.current?.querySelector<HTMLInputElement>("input");
+        input?.focus();
+        // A new file is almost always "name.ext"; put the caret before the
+        // extension so typing replaces the stem rather than appending to it.
+        input?.select();
+      }, 50);
+    }
+  }, [createFileRequested]);
 
   useEffect(() => {
     if (!conflictModal) return;
@@ -1621,6 +2559,239 @@ function FileManagerPage() {
     setCreateFolderName("");
   }, [createFolderCallable, runOperation, setError]);
 
+  const handleCreateFile = useCallback(async (parentDir: string, name: string) => {
+    if (!name) return setError(t("error.invalid_name"));
+    await runOperation(t("action.creating_file"), () => createFileCallable(parentDir, name), {
+      onError: (e) => {
+        setError(e?.message ?? t("error.could_not_create_file"));
+      },
+    });
+    setCreateFileRequested(false);
+    setCreateFileName("");
+  }, [createFileCallable, runOperation, setError]);
+
+  /**
+   * The backend raises Portuguese messages; inside the editor a permission
+   * problem is shown in the modal itself rather than stacking a second
+   * ModalRoot on top of the one the user is looking at.
+   */
+  const openEditor = useCallback((item: FileEntry) => {
+    setEditorBuffer({
+      path: item.path,
+      name: item.name,
+      content: "",
+      original: "",
+      encoding: "utf-8",
+      modified: 0,
+      readOnly: false,
+    });
+    setEditorLoading(true);
+    setEditorError(null);
+    setEditorStale(false);
+    setEditorSaved(false);
+    setEditorDiscardPrompt(false);
+    setEditingLine(null);
+    setVisibleLines(150);
+
+    void (async () => {
+      try {
+        const res = await readTextFile(item.path);
+        setEditorBuffer({
+          path: res.path,
+          name: res.name,
+          content: res.content,
+          original: res.content,
+          encoding: res.encoding,
+          modified: res.modified,
+          readOnly: res.read_only,
+        });
+      } catch (e: any) {
+        setEditorError(backendErrorMessage(e, "error.could_not_open_file"));
+      } finally {
+        setEditorLoading(false);
+      }
+    })();
+  }, []);
+
+  const closeEditor = useCallback(() => {
+    setEditorBuffer(null);
+    setEditingLine(null);
+    setEditorError(null);
+    setEditorStale(false);
+    setEditorDiscardPrompt(false);
+  }, []);
+
+  const saveEditor = useCallback((force: boolean, closeAfter = false) => {
+    void (async () => {
+      const buffer = editorBufferRef.current;
+      if (!buffer || editorSavingRef.current) return;
+
+      editorSavingRef.current = true;
+      setEditorSaving(true);
+      setEditorError(null);
+
+      try {
+        const res = await writeTextFile(buffer.path, buffer.content, buffer.modified, buffer.encoding, force);
+
+        if (!res.success) {
+          if (res.stale) {
+            setEditorStale(true);
+            return;
+          }
+          throw new Error(t("error.could_not_save_file"));
+        }
+
+        setEditorBuffer((prev) => prev ? {
+          ...prev,
+          original: prev.content,
+          modified: res.modified,
+          encoding: res.encoding ?? prev.encoding,
+        } : prev);
+        setEditorStale(false);
+        setEditorSaved(true);
+        window.setTimeout(() => setEditorSaved(false), 2000);
+        void refreshPanes();
+        if (closeAfter) closeEditor();
+      } catch (e: any) {
+        setEditorError(backendErrorMessage(e, "error.could_not_save_file"));
+      } finally {
+        editorSavingRef.current = false;
+        setEditorSaving(false);
+      }
+    })();
+  }, [closeEditor, refreshPanes]);
+
+  const reloadEditor = useCallback(() => {
+    const buffer = editorBufferRef.current;
+    if (buffer) openEditor({ name: buffer.name, path: buffer.path, is_dir: false, size: null, modified: 0 });
+  }, [openEditor]);
+
+  const startEditLine = useCallback((index: number) => {
+    const buffer = editorBufferRef.current;
+    if (!buffer || buffer.readOnly) return;
+    const line = buffer.content.split("\n")[index] ?? "";
+    setEditingLine(index);
+    setEditingValue(line);
+    setEditingCaret(line.length);
+  }, []);
+
+  const setEditingText = useCallback((value: string, caret: number) => {
+    setEditingValue(value);
+    setEditingCaret(Math.max(0, Math.min(caret, value.length)));
+  }, []);
+
+  /**
+   * The line being typed, written back into the buffer.
+   *
+   * Returns the whole file so callers that need the result now — moving to
+   * another line, splitting one — can keep working from it instead of waiting
+   * for the state to come back around on the next render.
+   */
+  const commitEditingLine = useCallback((): string[] | null => {
+    const buffer = editorBufferRef.current;
+    const index = editingLineRef.current;
+    if (!buffer || index === null) return null;
+    const lines = buffer.content.split("\n");
+    lines[index] = editingValueRef.current;
+    setEditorBuffer({ ...buffer, content: lines.join("\n") });
+    return lines;
+  }, []);
+
+  /** Commit this line, then carry on typing the one above or below it. */
+  const moveEditingLine = useCallback((delta: number) => {
+    const index = editingLineRef.current;
+    const lines = commitEditingLine();
+    if (!lines || index === null) return;
+
+    const target = index + delta;
+    if (target < 0 || target >= lines.length) return;
+
+    const line = lines[target] ?? "";
+    setEditingLine(target);
+    setEditingValue(line);
+    setEditingCaret(line.length);
+    setVisibleLines((count) => Math.max(count, target + 2));
+  }, [commitEditingLine]);
+
+  /** Enter: break the line at the cursor and continue on the new one. */
+  const splitEditingLine = useCallback(() => {
+    const buffer = editorBufferRef.current;
+    const index = editingLineRef.current;
+    if (!buffer || buffer.readOnly || index === null) return;
+
+    const value = editingValueRef.current;
+    const caret = Math.max(0, Math.min(editingCaretRef.current, value.length));
+    const head = value.slice(0, caret);
+    const tail = value.slice(caret);
+
+    const lines = buffer.content.split("\n");
+    lines.splice(index, 1, head, tail);
+    setEditorBuffer({ ...buffer, content: lines.join("\n") });
+    setEditingLine(index + 1);
+    setEditingValue(tail);
+    setEditingCaret(0);
+    setVisibleLines((count) => Math.max(count, index + 3));
+  }, []);
+
+  const applyLineEdit = useCallback(() => {
+    commitEditingLine();
+    setEditingLine(null);
+  }, [commitEditingLine]);
+
+  /** Add an empty line below and drop straight into typing it. */
+  const insertLineAfter = useCallback((index: number) => {
+    const buffer = editorBufferRef.current;
+    if (!buffer || buffer.readOnly) return;
+    const lines = buffer.content.split("\n");
+    lines[index] = editingLineRef.current === index ? editingValueRef.current : lines[index] ?? "";
+    lines.splice(index + 1, 0, "");
+    setEditorBuffer({ ...buffer, content: lines.join("\n") });
+    setEditingLine(index + 1);
+    setEditingValue("");
+    setEditingCaret(0);
+    setVisibleLines((count) => Math.max(count, index + 3));
+  }, []);
+
+  const deleteLine = useCallback((index: number) => {
+    setEditorBuffer((prev) => {
+      if (!prev || prev.readOnly) return prev;
+      const next = prev.content.split("\n");
+      // A file always has at least one line; emptying the last one is a clear.
+      if (next.length <= 1) return { ...prev, content: "" };
+      next.splice(index, 1);
+      return { ...prev, content: next.join("\n") };
+    });
+    setEditingLine(null);
+  }, []);
+
+  /**
+   * B steps back one layer at a time rather than throwing the file away, and
+   * keeps what was typed: the line is committed to the buffer, which still
+   * leaves the file on disk untouched until Save.
+   */
+  const editorBack = useCallback(() => {
+    if (editingLineRef.current !== null) {
+      applyLineEdit();
+      return;
+    }
+    if (editorDiscardPromptRef.current) {
+      setEditorDiscardPrompt(false);
+      return;
+    }
+    if (editorStaleRef.current) {
+      setEditorStale(false);
+      return;
+    }
+    const buffer = editorBufferRef.current;
+    if (buffer && buffer.content !== buffer.original) {
+      setEditorDiscardPrompt(true);
+      return;
+    }
+    closeEditor();
+  }, [applyLineEdit, closeEditor]);
+
+  editorBackRef.current = editorBack;
+
   const handleConflictChoice = useCallback(async (strategy: string, applyToAll = false) => {
     if (!conflictModal) return;
 
@@ -1672,6 +2843,69 @@ function FileManagerPage() {
         }
         window.setTimeout(() => setDualPane(next), 0);
       };
+      const clearRecent = () => {
+        saveRecentPaths([]);
+        setRecentPaths([]);
+      };
+
+      // One entry that opens the history, rather than a dozen loose entries
+      // pushed to the bottom of the menu.
+      const recentItems = recentPaths.map((entry) => {
+        const go = () => goToRecent(entry);
+        return (
+          <MenuItem key={`recent-${entry.path}`} onClick={go} onSelected={go}>
+            <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <HistoryIcon />
+              <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", minWidth: 0 }}>
+                <span>{entry.name}</span>
+                <span style={{ fontSize: 11, opacity: 0.55 }}>{shortPath(entry.path, 2)}</span>
+              </span>
+            </span>
+          </MenuItem>
+        );
+      });
+
+      const recentClearItem = (
+        <MenuItem key="recent-clear" onClick={clearRecent} onSelected={clearRecent}>
+          <span style={{ display: "flex", alignItems: "center", gap: 10 }}><HistoryIcon />{t("recent.clear")}</span>
+        </MenuItem>
+      );
+
+      const openRecentSubmenu = () => {
+        // Picking a MenuItem closes its menu; let that finish before the
+        // history goes up in its place.
+        window.setTimeout(() => {
+          contextMenuInstance.current = showContextMenu(
+            <Menu label={t("menu.recent_locations")}>
+              {recentItems}
+              <MenuSeparator />
+              {recentClearItem}
+            </Menu>,
+            anchor,
+          );
+        }, 0);
+      };
+
+      const recentLocations = !recentPaths.length ? null : SubMenu ? (
+        <SubMenu key="recent-locations" label={t("menu.recent_locations")}>
+          {recentItems}
+          <MenuSeparator />
+          {recentClearItem}
+        </SubMenu>
+      ) : (
+        <MenuItem key="recent-locations" onClick={openRecentSubmenu} onSelected={openRecentSubmenu}>
+          <span style={{ display: "flex", alignItems: "center", gap: 10 }}><HistoryIcon />{t("menu.recent_locations")}</span>
+        </MenuItem>
+      );
+      const exitApp = () => {
+        // Same teardown caveat as toggleSplit: close the menu first, navigate
+        // away on the next tick.
+        if (contextMenuInstance.current) {
+          contextMenuInstance.current.Hide();
+          contextMenuInstance.current = null;
+        }
+        window.setTimeout(() => exitPluginRef.current(), 0);
+      };
 
       if (item) {
         const copy = async () => {
@@ -1704,6 +2938,16 @@ function FileManagerPage() {
         };
         const copyToOther = () => void handleTransferToOtherPane(item, "copy");
         const moveToOther = () => void handleTransferToOtherPane(item, "cut");
+        const edit = () => {
+          // The menu lives in its own React root that Steam tears down
+          // synchronously on activation; opening the modal on the next tick
+          // keeps the state update from being dropped mid-teardown.
+          if (contextMenuInstance.current) {
+            contextMenuInstance.current.Hide();
+            contextMenuInstance.current = null;
+          }
+          window.setTimeout(() => openEditor(item), 0);
+        };
         const rename = () => {
           setRenameTarget(item.path);
           setRenameValue(item.name);
@@ -1766,6 +3010,13 @@ function FileManagerPage() {
             ) : null}
             {splitOn ? <MenuSeparator /> : null}
 
+            {!item.is_dir ? <MenuSeparator /> : null}
+            {!item.is_dir ? (
+              <MenuItem onClick={edit} onSelected={edit}>
+                <span style={{ display: "flex", alignItems: "center", gap: 10 }}><EditIcon />{t("menu.edit")}</span>
+              </MenuItem>
+            ) : null}
+
             {isArchiveFile(item.name) ? (
               <MenuItem onClick={() => void extract()} onSelected={() => void extract()}>
                 <span style={{ display: "flex", alignItems: "center", gap: 10 }}><ExtractIcon />{t("menu.extract")}</span>
@@ -1776,9 +3027,15 @@ function FileManagerPage() {
               <span style={{ display: "flex", alignItems: "center", gap: 10 }}><NewFolderIcon />{t("menu.newFolder")}</span>
             </MenuItem>
 
+            <MenuItem onClick={() => setCreateFileRequested(true)} onSelected={() => setCreateFileRequested(true)}>
+              <span style={{ display: "flex", alignItems: "center", gap: 10 }}><NewFileIcon />{t("menu.newFile")}</span>
+            </MenuItem>
+
             <MenuItem onClick={toggleSplit} onSelected={toggleSplit}>
               <span style={{ display: "flex", alignItems: "center", gap: 10 }}><SplitViewIcon />{splitOn ? t("menu.split_view_close") : t("menu.split_view")}</span>
             </MenuItem>
+
+            {recentLocations}
 
             <MenuSeparator />
 
@@ -1793,6 +3050,12 @@ function FileManagerPage() {
             <MenuItem onClick={properties} onSelected={properties}>
               <span style={{ display: "flex", alignItems: "center", gap: 10 }}><PropertiesIcon />{t("menu.properties")}</span>
             </MenuItem>
+
+            <MenuSeparator />
+
+            <MenuItem onClick={exitApp} onSelected={exitApp}>
+              <span style={{ display: "flex", alignItems: "center", gap: 10 }}><ExitIcon />{t("menu.exit")}</span>
+            </MenuItem>
           </Menu>,
           anchor,
         );
@@ -1803,9 +3066,13 @@ function FileManagerPage() {
             <MenuItem onClick={() => setCreateFolderRequested(true)} onSelected={() => setCreateFolderRequested(true)}>
               <span style={{ display: "flex", alignItems: "center", gap: 10 }}><NewFolderIcon />{t("menu.newFolder")}</span>
             </MenuItem>
+            <MenuItem onClick={() => setCreateFileRequested(true)} onSelected={() => setCreateFileRequested(true)}>
+              <span style={{ display: "flex", alignItems: "center", gap: 10 }}><NewFileIcon />{t("menu.newFile")}</span>
+            </MenuItem>
             <MenuItem onClick={toggleSplit} onSelected={toggleSplit}>
               <span style={{ display: "flex", alignItems: "center", gap: 10 }}><SplitViewIcon />{splitOn ? t("menu.split_view_close") : t("menu.split_view")}</span>
             </MenuItem>
+            {recentLocations}
             {drives.length ? <MenuSeparator /> : null}
             {drives.map((drive) => {
               const go = () => goToDrive(drive);
@@ -1815,6 +3082,10 @@ function FileManagerPage() {
                 </MenuItem>
               );
             })}
+            <MenuSeparator />
+            <MenuItem onClick={exitApp} onSelected={exitApp}>
+              <span style={{ display: "flex", alignItems: "center", gap: 10 }}><ExitIcon />{t("menu.exit")}</span>
+            </MenuItem>
           </Menu>,
           anchor,
         );
@@ -1833,7 +3104,11 @@ function FileManagerPage() {
       handleOperationError,
       handlePaste,
       handleTransferToOtherPane,
+      goToRecent,
+      openEditor,
+      recentPaths,
       refreshClipboard,
+      refreshRecent,
       renamePath,
       runOperation,
       setError,
@@ -1898,8 +3173,15 @@ function FileManagerPage() {
     setActivePane(pane.index);
     if (item.is_dir) {
       void pane.loadPath(item.path, undefined, true, item.path);
+      return;
     }
-  }, [setActivePane]);
+    // Archives have their own action in the menu; everything else opens in the
+    // editor and the backend decides — refusing binaries and oversized files
+    // with a message beats A silently doing nothing.
+    if (!isArchiveFile(item.name)) {
+      openEditor(item);
+    }
+  }, [setActivePane, openEditor]);
 
   useEffect(() => {
     isPluginActive.current = true;
@@ -1911,6 +3193,13 @@ function FileManagerPage() {
   useEffect(() => {
     setError(null);
   }, [activePane.path, setError]);
+
+  // Every navigation lands here, so this is where the history is written.
+  useEffect(() => {
+    if (!activePane.path) return;
+    setRecentPaths(recentEntriesFrom(recordRecentPath(activePane.path)));
+  }, [activePane.path]);
+
 
   const visiblePanes: PaneApi[] = dualPane ? [paneA, paneB] : [activePane];
 
@@ -1928,6 +3217,40 @@ function FileManagerPage() {
         >
           <div ref={fileManagerScopeRef} data-file-manager-scope style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: "100%", padding: "56px 12px 48px", boxSizing: "border-box" }}>
             <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: "100%" }}>
+              <div style={{ display: "flex", justifyContent: "flex-end", fontSize: 10, opacity: 0.45, paddingBottom: 4 }}>
+                v{packageInfo.version}
+              </div>
+
+              {editorBuffer ? (
+                <EditorView
+                  buffer={editorBuffer}
+                  loading={editorLoading}
+                  saving={editorSaving}
+                  saved={editorSaved}
+                  error={editorError}
+                  stale={editorStale}
+                  discardPrompt={editorDiscardPrompt}
+                  editingLine={editingLine}
+                  editingValue={editingValue}
+                  visibleLines={visibleLines}
+                  onEditingText={setEditingText}
+                  onStartLine={startEditLine}
+                  onMoveLine={moveEditingLine}
+                  onSplitLine={splitEditingLine}
+                  onApplyLine={applyLineEdit}
+                  onCancelLine={() => setEditingLine(null)}
+                  onClearLine={() => setEditingText("", 0)}
+                  onInsertLine={insertLineAfter}
+                  onDeleteLine={deleteLine}
+                  onShowMore={() => setVisibleLines((count) => count + 150)}
+                  onSave={saveEditor}
+                  onReload={reloadEditor}
+                  onKeepEditing={() => { setEditorDiscardPrompt(false); setEditorStale(false); }}
+                  onDiscard={closeEditor}
+                  onClose={editorBack}
+                />
+              ) : (
+                <>
               <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
                 {dualPane ? (
                   <span
@@ -1981,56 +3304,51 @@ function FileManagerPage() {
                 </div>
               </div>
 
-              <div style={{ width: "100%", padding: "8px 0", boxSizing: "border-box", minWidth: 0 }}>
+              <div style={{ width: "100%", padding: "6px 0", boxSizing: "border-box", minWidth: 0 }}>
                 <Focusable
                   navEntryPreferPosition={NavEntryPositionPreferences.MAINTAIN_X}
-                  style={{ display: "flex", gap: "12px", width: "100%", padding: "0" }}
+                  style={{ display: "flex", alignItems: "stretch", gap: 8, width: "100%" }}
                 >
-                  <div style={{ flex: "1 1 0%", minWidth: 0, display: "flex", alignItems: "center", justifyContent: "flex-start", padding: "0" }}>
-                    <div style={{ width: "100%", minWidth: 0 }}>
-                      <ToggleField
-                        label={t("label.hidden")}
-                        checked={showHidden}
-                        onChange={(v: boolean) => setShowHidden(v)}
-                      />
-                    </div>
-                  </div>
-                  <div style={{ flex: "1 1 0%", minWidth: 0, display: "flex", alignItems: "center", justifyContent: "flex-start", padding: "0" }}>
-                    <div style={{ width: "100%", minWidth: 0 }}>
-                      <ToggleField
-                        label={t("label.split_view")}
-                        checked={dualPane}
-                        onChange={(v: boolean) => setDualPane(v)}
-                      />
-                    </div>
-                  </div>
-                  <div style={{ flex: "1 1 0%", minWidth: 0, display: "flex", alignItems: "center", justifyContent: "flex-start", padding: "0" }}>
-                    <div style={{ width: "100%", minWidth: 0 }}>
-                      <DropdownItem
-                        label={t("label.order")}
-                        rgOptions={[
-                          { label: t("option.az"), data: "asc" },
-                          { label: t("option.za"), data: "desc" },
-                        ]}
-                        selectedOption={sortOrder}
-                        onChange={(option) => setSortOrder(option.data as "asc" | "desc")}
-                      />
-                    </div>
-                  </div>
-                  <div style={{ flex: "1 1 0%", minWidth: 0, display: "flex", alignItems: "center", justifyContent: "flex-start", padding: "0" }}>
-                    <div style={{ width: "100%", minWidth: 0 }}>
-                      <DropdownItem
-                        label={t("label.type")}
-                        rgOptions={[
-                          { label: t("option.all"), data: "all" },
-                          { label: t("option.folders"), data: "folders" },
-                          { label: t("option.files"), data: "files" },
-                        ]}
-                        selectedOption={fileTypeFilter}
-                        onChange={(option) => setFileTypeFilter(option.data as string)}
-                      />
-                    </div>
-                  </div>
+                  <ToolbarControl
+                    label={t("label.hidden")}
+                    value={showHidden ? t("option.on") : t("option.off")}
+                    active={showHidden}
+                    onActivate={() => setShowHidden(!showHidden)}
+                  />
+                  <ToolbarControl
+                    label={t("label.split_view")}
+                    value={dualPane ? t("option.on") : t("option.off")}
+                    active={dualPane}
+                    onActivate={() => setDualPane(!dualPane)}
+                  />
+                  <ToolbarControl
+                    label={t("label.order")}
+                    value={sortOrder === "asc" ? t("option.az") : t("option.za")}
+                    active={sortOrder !== "asc"}
+                    onActivate={() => setSortOrder(sortOrder === "asc" ? "desc" : "asc")}
+                  />
+                  <ToolbarControl
+                    label={t("label.type")}
+                    value={
+                      fileTypeFilter === "folders"
+                        ? t("option.folders")
+                        : fileTypeFilter === "files"
+                          ? t("option.files")
+                          : t("option.all")
+                    }
+                    active={fileTypeFilter !== "all"}
+                    onActivate={() =>
+                      setFileTypeFilter(
+                        fileTypeFilter === "all" ? "folders" : fileTypeFilter === "folders" ? "files" : "all",
+                      )
+                    }
+                  />
+                  <ToolbarControl
+                    label={t("label.view")}
+                    value={viewMode === "grid" ? t("option.grid") : t("option.list")}
+                    active={viewMode === "grid"}
+                    onActivate={() => setViewMode(viewMode === "grid" ? "list" : "grid")}
+                  />
                 </Focusable>
               </div>
 
@@ -2064,12 +3382,15 @@ function FileManagerPage() {
                     showHidden={showHidden}
                     sortOrder={sortOrder}
                     fileTypeFilter={fileTypeFilter}
+                    viewMode={viewMode}
                     onPaneFocus={setActivePane}
                     onOpenDir={handleOpenDir}
                     registerContainer={registerPaneContainer}
                   />
                 ))}
               </Focusable>
+                </>
+              )}
             </div>
           </div>
         </Focusable>
@@ -2199,6 +3520,58 @@ function FileManagerPage() {
                       <Focusable navEntryPreferPosition={NavEntryPositionPreferences.MAINTAIN_X}>
                         <div style={{ width: "100%" }}>
                           <DialogButton onClick={() => { setCreateFolderRequested(false); setCreateFolderName(""); }}>
+                            {t("action.cancel")}
+                          </DialogButton>
+                        </div>
+                      </Focusable>
+                    </div>
+                  </Focusable>
+                </ModalFocusScope>
+              </DialogBody>
+            </ModalRoot>
+          )}
+
+          {createFileRequested && (
+            <ModalRoot
+              show={true}
+              bDisableBackgroundDismiss={true}
+              bHideMainWindowForPopouts={true}
+              onCancel={() => { setCreateFileRequested(false); setCreateFileName(""); }}
+            >
+              <DialogBody>
+                <ModalFocusScope>
+                  <Focusable
+                    navEntryPreferPosition={NavEntryPositionPreferences.MAINTAIN_X}
+                    onCancel={() => { setCreateFileRequested(false); setCreateFileName(""); }}
+                    onCancelButton={() => { setCreateFileRequested(false); setCreateFileName(""); }}
+                    style={{ outline: "none", display: "flex", flexDirection: "column", alignItems: "stretch" }}
+                  >
+                    <div style={{ textAlign: "center", padding: "6px 0 12px" }}>
+                      <h1 style={{ margin: 0 }}>{t("modal.new_file")}</h1>
+                    </div>
+
+                    <div ref={createFileRef} style={{ padding: "6px 0" }}>
+                      <TextField
+                        value={createFileName}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCreateFileName(e.currentTarget.value)}
+                        bShowCopyAction={false}
+                        autoFocus
+                      />
+                    </div>
+
+                    <div style={{ display: "flex", flexDirection: "column", gap: 12, width: "100%", marginTop: 16 }}>
+                      <Focusable navEntryPreferPosition={NavEntryPositionPreferences.MAINTAIN_X}>
+                        <div style={{ width: "100%" }}>
+                          <DialogButton ref={createFileConfirmRef as any} onClick={async () => {
+                            await handleCreateFile(panesRef.current[activePaneIndexRef.current].pathRef.current, createFileName);
+                          }}>
+                            {t("action.create")}
+                          </DialogButton>
+                        </div>
+                      </Focusable>
+                      <Focusable navEntryPreferPosition={NavEntryPositionPreferences.MAINTAIN_X}>
+                        <div style={{ width: "100%" }}>
+                          <DialogButton onClick={() => { setCreateFileRequested(false); setCreateFileName(""); }}>
                             {t("action.cancel")}
                           </DialogButton>
                         </div>
@@ -2416,6 +3789,47 @@ function FileManagerPage() {
         </>
       ) : null}
 
+      {exitHoldActive ? (
+        <div
+          style={{
+            position: "fixed",
+            left: 0,
+            right: 0,
+            bottom: 76,
+            display: "flex",
+            justifyContent: "center",
+            pointerEvents: "none",
+            zIndex: 1000,
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+              minWidth: 220,
+              padding: "10px 16px",
+              borderRadius: 6,
+              background: "rgba(10,16,24,0.92)",
+              border: "1px solid rgba(255,255,255,0.12)",
+              boxShadow: "0 6px 24px rgba(0,0,0,0.45)",
+            }}
+          >
+            <span style={{ fontSize: 12, letterSpacing: 0.3, textAlign: "center", opacity: 0.9 }}>{t("exit.holding")}</span>
+            <div style={{ height: 4, borderRadius: 2, background: "rgba(255,255,255,0.15)", overflow: "hidden" }}>
+              <div
+                style={{
+                  height: "100%",
+                  width: exitHoldFilled ? "100%" : "0%",
+                  background: "rgba(120,180,255,0.95)",
+                  transition: `width ${EXIT_HOLD_MS}ms linear`,
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <div
         style={{
           position: "fixed",
@@ -2437,6 +3851,7 @@ function FileManagerPage() {
           <div style={{ display: "flex", alignItems: "center", gap: 14, fontSize: 11, opacity: 0.55, whiteSpace: "nowrap", overflow: "hidden" }}>
             <span>{`X · ${dualPane ? t("hint.split_close") : t("hint.split_open")}`}</span>
             {dualPane ? <span>{`L1 / R1 · ${t("hint.switch_panel")}`}</span> : null}
+            <span>{t("hint.hold_exit")}</span>
           </div>
         ) : <div />}
 
@@ -2488,7 +3903,7 @@ function FileManagerPage() {
 function Content() {
   const openFullScreen = useCallback(() => {
     Router.CloseSideMenus();
-    Router.Navigate?.("/decky-file-manager");
+    Router.Navigate?.(ROUTE);
   }, []);
 
   return (
@@ -2508,12 +3923,17 @@ function Content() {
   );
 }
 
-routerHook.addRoute("/decky-file-manager", FileManagerPage);
+routerHook.addRoute(ROUTE, FileManagerPage);
 
 export default definePlugin(() => {
+  const unpatchLibraryContextMenu = patchLibraryContextMenu();
+
   return {
     name: "Decky File Manager",
     content: <Content />,
     icon: <PluginIcon />,
+    onDismount() {
+      unpatchLibraryContextMenu();
+    },
   };
 });

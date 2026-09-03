@@ -8,6 +8,7 @@ class Plugin:
         self._clipboard_path: str | None = None
         self._clipboard_kind: str | None = None
         self._last_path: str | None = None
+        self._recent_paths: list = []
         self._settings: dict = {"default_path": "/home/deck"}
         self._settings_file = os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, "settings.json")
         self._runtime_file = os.path.join(decky.DECKY_PLUGIN_RUNTIME_DIR, "runtime.json")
@@ -64,12 +65,20 @@ class Plugin:
                     self._last_path = os.path.abspath(last_path)
                 else:
                     self._last_path = None
+
+                recent = data.get("recent_paths") or []
+                self._recent_paths = [
+                    os.path.abspath(entry) for entry in recent
+                    if isinstance(entry, str) and entry
+                ][:self._RECENT_LIMIT]
             else:
                 self._last_path = None
+                self._recent_paths = []
         except (ValueError, OSError):
             self._clipboard_path = None
             self._clipboard_kind = None
             self._last_path = None
+            self._recent_paths = []
 
     def _save_runtime_state(self) -> None:
         self._ensure_runtime_dir()
@@ -81,9 +90,21 @@ class Plugin:
                 "kind": self._clipboard_kind,
             },
             "last_path": self._last_path,
+            "recent_paths": self._recent_paths,
         }
         with open(self._runtime_file, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+
+    # How many folders back the history reaches. Long enough to cover a
+    # session's worth of jumping around, short enough to stay a menu.
+    _RECENT_LIMIT = 12
+
+    def _record_recent(self, path: str) -> None:
+        """Most recent first, no duplicates, capped at _RECENT_LIMIT."""
+        path = os.path.abspath(path)
+        self._recent_paths = [entry for entry in self._recent_paths if entry != path]
+        self._recent_paths.insert(0, path)
+        del self._recent_paths[self._RECENT_LIMIT:]
 
     def _normalize_dir(self, path: str) -> str:
         if not path:
@@ -272,6 +293,7 @@ class Plugin:
         path = self._normalize_dir(path)
         self._validate_exists_dir(path)
         self._last_path = path
+        self._record_recent(path)
         self._save_runtime_state()
 
         entries = []
@@ -582,6 +604,220 @@ class Plugin:
 
 
     # ------------------------------------------------------------------
+    # Text editor
+    # ------------------------------------------------------------------
+
+    # The whole file crosses the RPC bridge as a single string, and nothing
+    # larger than this is worth editing with a gamepad anyway.
+    _EDITOR_MAX_BYTES = 1024 * 1024
+
+    # A UTF-16 file is full of NUL bytes, so sniffing raw bytes for NUL would
+    # reject perfectly ordinary XML written on Windows. Detect the encoding
+    # from the byte-order mark first, and only judge the *decoded* text.
+    # UTF-32 BOMs must be tested before UTF-16: b"\xff\xfe\x00\x00" starts
+    # with the UTF-16-LE mark.
+    _BOM_ENCODINGS = (
+        (b"\xff\xfe\x00\x00", "utf-32-le"),
+        (b"\x00\x00\xfe\xff", "utf-32-be"),
+        (b"\xef\xbb\xbf", "utf-8-bom"),
+        (b"\xff\xfe", "utf-16-le"),
+        (b"\xfe\xff", "utf-16-be"),
+    )
+
+    # Byte-order mark to re-emit, and the codec to use, per stored token.
+    _ENCODING_BOMS = {
+        "utf-32-le": b"\xff\xfe\x00\x00",
+        "utf-32-be": b"\x00\x00\xfe\xff",
+        "utf-8-bom": b"\xef\xbb\xbf",
+        "utf-16-le": b"\xff\xfe",
+        "utf-16-be": b"\xfe\xff",
+    }
+    _ENCODING_CODECS = {"utf-8-bom": "utf-8"}
+
+    def _decode_text(self, raw: bytes) -> tuple:
+        for bom, token in self._BOM_ENCODINGS:
+            if raw.startswith(bom):
+                try:
+                    return raw[len(bom):].decode(self._ENCODING_CODECS.get(token, token)), token
+                except UnicodeDecodeError:
+                    break
+
+        try:
+            return raw.decode("utf-8"), "utf-8"
+        except UnicodeDecodeError:
+            pass
+
+        if b"\x00" in raw:
+            raise ValueError("Arquivo binário não pode ser editado")
+
+        # latin-1 decodes any byte string and re-encodes to exactly the same
+        # bytes, so a file we could not read as UTF-8 still round-trips.
+        return raw.decode("latin-1"), "latin-1"
+
+    def _encode_text(self, text: str, token: str) -> bytes:
+        codec = self._ENCODING_CODECS.get(token, token or "utf-8")
+        return self._ENCODING_BOMS.get(token, b"") + text.encode(codec)
+
+    def _read_text(self, path: str) -> tuple:
+        with open(path, "rb") as handle:
+            raw = handle.read(self._EDITOR_MAX_BYTES + 1)
+
+        if len(raw) > self._EDITOR_MAX_BYTES:
+            raise ValueError("Arquivo grande demais para editar")
+
+        text, encoding = self._decode_text(raw)
+
+        # A NUL that survives decoding means this was never text.
+        if "\x00" in text:
+            raise ValueError("Arquivo binário não pode ser editado")
+
+        return text, encoding
+
+    def _write_text(self, path: str, data: bytes) -> str:
+        import tempfile
+
+        directory = os.path.dirname(path) or "/"
+
+        try:
+            mode = os.stat(path).st_mode & 0o7777
+        except OSError:
+            mode = None
+
+        try:
+            fd, temp_path = tempfile.mkstemp(dir=directory, prefix=".dfm-edit-", suffix=".tmp")
+        except OSError:
+            # The directory is not writable, but the file itself may still be;
+            # fall back to a plain in-place write rather than failing outright.
+            with open(path, "wb") as handle:
+                handle.write(data)
+            return "direct"
+
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+            if mode is not None:
+                os.chmod(temp_path, mode)
+            os.replace(temp_path, path)
+        except BaseException:
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+            raise
+
+        return "atomic"
+
+    async def read_text_file(self, path: str) -> dict:
+        if not path:
+            raise ValueError("Caminho inválido")
+        path = os.path.abspath(path)
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Item não existe: {path}")
+        if os.path.isdir(path):
+            raise IsADirectoryError(f"É uma pasta, não um arquivo: {path}")
+
+        try:
+            content, encoding = await asyncio.to_thread(self._read_text, path)
+        except PermissionError as e:
+            raise PermissionError(f"Sem permissão para ler: {path}") from e
+
+        stat = os.stat(path)
+
+        return {
+            "path": path,
+            "name": os.path.basename(path),
+            "content": content,
+            "encoding": encoding,
+            "size": stat.st_size,
+            "modified": int(stat.st_mtime),
+            "read_only": not os.access(path, os.W_OK),
+        }
+
+    async def write_text_file(
+        self,
+        path: str,
+        content: str,
+        expected_modified: int = 0,
+        encoding: str = "utf-8",
+        force: bool = False,
+    ) -> dict:
+        if not path:
+            raise ValueError("Caminho inválido")
+        # Resolve the link before writing: os.replace on a symlink would swap
+        # out the link itself instead of the file it points at.
+        path = os.path.realpath(os.path.abspath(path))
+        if os.path.isdir(path):
+            raise IsADirectoryError(f"É uma pasta, não um arquivo: {path}")
+
+        if os.path.exists(path) and expected_modified and not force:
+            current = int(os.stat(path).st_mtime)
+            if current != expected_modified:
+                return {"success": False, "stale": True, "path": path, "modified": current}
+
+        try:
+            data = self._encode_text(content, encoding or "utf-8")
+            used_encoding = encoding or "utf-8"
+        except (UnicodeEncodeError, LookupError):
+            # The file was latin-1 but now holds characters that encoding has
+            # no room for; UTF-8 is the only way to keep what was typed.
+            data = content.encode("utf-8")
+            used_encoding = "utf-8"
+
+        try:
+            await asyncio.to_thread(self._write_text, path, data)
+        except PermissionError as e:
+            raise PermissionError(f"Sem permissão para gravar: {path}") from e
+        except OSError as e:
+            raise OSError(f"Não foi possível gravar: {path} ({e.strerror or e})") from e
+
+        stat = os.stat(path)
+
+        return {
+            "success": True,
+            "path": path,
+            "size": stat.st_size,
+            "modified": int(stat.st_mtime),
+            "encoding": used_encoding,
+        }
+
+    async def create_file(self, parent_dir: str, name: str) -> dict:
+        parent_dir = self._normalize_dir(parent_dir)
+        self._validate_exists_dir(parent_dir)
+
+        if not name or "/" in name or "\\" in name or name in (".", ".."):
+            raise ValueError("Nome inválido")
+
+        new_path = os.path.join(parent_dir, name)
+        if os.path.exists(new_path):
+            raise FileExistsError(f"Já existe um item com esse nome: {new_path}")
+
+        try:
+            with open(new_path, "x"):
+                pass
+        except PermissionError as e:
+            raise PermissionError(f"Sem permissão: {e}") from e
+
+        return {"success": True, "path": new_path, "new_path": new_path}
+
+    async def get_recent_paths(self) -> dict:
+        """Recently visited folders, most recent first, minus any that are gone."""
+        existing = [entry for entry in self._recent_paths if os.path.isdir(entry)]
+
+        if existing != self._recent_paths:
+            self._recent_paths = existing
+            self._save_runtime_state()
+
+        return {"paths": [{"path": entry, "name": os.path.basename(entry) or entry} for entry in existing]}
+
+    async def clear_recent_paths(self) -> dict:
+        self._recent_paths = []
+        self._save_runtime_state()
+        return {"success": True}
+
+
+    # ------------------------------------------------------------------
     # Drives / mounted volumes
     # ------------------------------------------------------------------
 
@@ -749,6 +985,270 @@ class Plugin:
     async def list_drives(self) -> dict:
         drives = await asyncio.to_thread(self._collect_drives)
         return {"drives": drives}
+
+    # ------------------------------------------------------------------
+    # Steam game folders (for the library context menu)
+    # ------------------------------------------------------------------
+
+    _STEAM_ROOT_CANDIDATES = (
+        "~/.local/share/Steam",
+        "~/.steam/steam",
+        "~/.steam/root",
+        "~/.var/app/com.valvesoftware.Steam/.local/share/Steam",
+    )
+
+    def _steam_roots(self) -> list:
+        home = os.environ.get("DECKY_USER_HOME") or os.path.expanduser("~")
+        roots: list = []
+        seen: set = set()
+
+        for candidate in self._STEAM_ROOT_CANDIDATES:
+            path = os.path.join(home, candidate[2:]) if candidate.startswith("~/") else candidate
+            if not os.path.isdir(path):
+                continue
+            real = os.path.realpath(path)
+            if real in seen:
+                continue
+            seen.add(real)
+            roots.append(real)
+
+        return roots
+
+    def _steam_libraries(self) -> list:
+        """Every steamapps directory Steam knows about, the install roots included.
+
+        libraryfolders.vdf has had two shapes: `"1" "/path"` in the old one and
+        a nested block with a `"path"` key in the current one. Both are read by
+        the same scan, rather than by a VDF parser the plugin does not ship.
+        Entries that are not library folders — the numeric keys inside an
+        "apps" block match the same pattern — fall out on the isdir check.
+        """
+        import re
+
+        libraries: list = []
+        seen: set = set()
+
+        def add(folder: str) -> None:
+            if not folder:
+                return
+            for name in ("steamapps", "SteamApps"):
+                steamapps = os.path.join(folder, name)
+                if not os.path.isdir(steamapps):
+                    continue
+                real = os.path.realpath(steamapps)
+                if real in seen:
+                    return
+                seen.add(real)
+                libraries.append(real)
+                return
+
+        for root in self._steam_roots():
+            add(root)
+            for name in ("steamapps", "SteamApps"):
+                vdf = os.path.join(root, name, "libraryfolders.vdf")
+                if not os.path.isfile(vdf):
+                    continue
+                try:
+                    with open(vdf, "r", encoding="utf-8", errors="replace") as f:
+                        content = f.read()
+                except OSError:
+                    continue
+                for match in re.finditer(r'"(?:path|\d+)"\s+"([^"]+)"', content):
+                    add(match.group(1))
+
+        return libraries
+
+    def _game_folders(self, appid: str) -> dict:
+        import re
+
+        install = None
+        compat = None
+        name = None
+
+        for steamapps in self._steam_libraries():
+            if install is None:
+                manifest = os.path.join(steamapps, "appmanifest_" + appid + ".acf")
+                if os.path.isfile(manifest):
+                    try:
+                        with open(manifest, "r", encoding="utf-8", errors="replace") as f:
+                            content = f.read()
+                    except OSError:
+                        content = ""
+                    title = re.search(r'"name"\s+"([^"]*)"', content)
+                    if title and name is None:
+                        name = title.group(1)
+                    installdir = re.search(r'"installdir"\s+"([^"]+)"', content)
+                    if installdir:
+                        candidate = os.path.join(steamapps, "common", installdir.group(1))
+                        if os.path.isdir(candidate):
+                            install = candidate
+
+            if compat is None:
+                # Non-Steam shortcuts have no manifest but do get a prefix, so
+                # this is looked up on its own rather than off the install dir.
+                candidate = os.path.join(steamapps, "compatdata", appid)
+                if os.path.isdir(candidate):
+                    compat = candidate
+
+            if install and compat:
+                break
+
+        if install is None:
+            # No manifest means it is not a Steam game. A non-Steam shortcut
+            # still knows where it points, so the folder comes from the
+            # shortcut's own Target field instead.
+            shortcut = self._shortcut_folder(appid)
+            install = shortcut.get("install")
+            if name is None:
+                name = shortcut.get("name")
+
+        return {"install": install, "compat": compat, "name": name}
+
+    def _parse_binary_vdf(self, data: bytes, pos: int = 0) -> tuple:
+        """One map out of a binary VDF, and where it ended.
+
+        shortcuts.vdf is Steam's binary format, not the text one: a map is a
+        run of typed entries — 0x00 nested map, 0x01 string, 0x02 int32,
+        0x07 uint64 — each a NUL-terminated key followed by its value, closed
+        by 0x08. Keys are lowercased because Steam's own casing has changed
+        between clients ("AppName" and "appname" both appear in the wild).
+        """
+        result: dict = {}
+        size = len(data)
+
+        while pos < size:
+            marker = data[pos]
+            pos += 1
+            if marker == 0x08:
+                return result, pos
+
+            end = data.find(b"\x00", pos)
+            if end == -1:
+                break
+            key = data[pos:end].decode("utf-8", "replace").lower()
+            pos = end + 1
+
+            if marker == 0x00:
+                value, pos = self._parse_binary_vdf(data, pos)
+            elif marker == 0x01:
+                end = data.find(b"\x00", pos)
+                if end == -1:
+                    break
+                value = data[pos:end].decode("utf-8", "replace")
+                pos = end + 1
+            elif marker == 0x02:
+                value = int.from_bytes(data[pos:pos + 4], "little", signed=False)
+                pos += 4
+            elif marker == 0x07:
+                value = int.from_bytes(data[pos:pos + 8], "little", signed=False)
+                pos += 8
+            else:
+                # An entry type this reader does not know: the rest of the
+                # file can no longer be located, so stop with what was read.
+                break
+
+            result[key] = value
+
+        return result, pos
+
+    def _shortcut_entries(self) -> list:
+        """Every non-Steam shortcut, from every account on this machine."""
+        entries: list = []
+
+        for root in self._steam_roots():
+            userdata = os.path.join(root, "userdata")
+            if not os.path.isdir(userdata):
+                continue
+            try:
+                users = os.listdir(userdata)
+            except OSError:
+                continue
+
+            for user in users:
+                path = os.path.join(userdata, user, "config", "shortcuts.vdf")
+                if not os.path.isfile(path):
+                    continue
+                try:
+                    with open(path, "rb") as f:
+                        data = f.read()
+                except OSError:
+                    continue
+                try:
+                    parsed, _ = self._parse_binary_vdf(data)
+                except (ValueError, IndexError):
+                    continue
+
+                shortcuts = parsed.get("shortcuts")
+                if not isinstance(shortcuts, dict):
+                    continue
+                for entry in shortcuts.values():
+                    if isinstance(entry, dict):
+                        entries.append(entry)
+
+        return entries
+
+    def _shortcut_ids(self, entry: dict) -> set:
+        """The ids a shortcut can be known by in the library.
+
+        The stored appid is a 32-bit value that some clients wrote signed, and
+        older shortcuts have none at all — theirs is derived from the target
+        and the name, the way Steam derives it.
+        """
+        import zlib
+
+        ids: set = set()
+
+        raw = entry.get("appid")
+        if isinstance(raw, int):
+            ids.add(raw & 0xFFFFFFFF)
+
+        # Steam derives the legacy id from the target exactly as stored,
+        # quotes included; the unquoted form is added too, since it is what
+        # some clients wrote.
+        raw_exe = str(entry.get("exe") or "")
+        appname = str(entry.get("appname") or "")
+        for variant in (raw_exe, raw_exe.strip().strip('"')):
+            if not variant:
+                continue
+            legacy = zlib.crc32((variant + appname).encode("utf-8")) | 0x80000000
+            ids.add(legacy & 0xFFFFFFFF)
+
+        return ids
+
+    def _shortcut_folder(self, appid: str) -> dict:
+        """Where a non-Steam shortcut lives, taken from its Target field.
+
+        Target is the executable the shortcut launches, so its directory is
+        what the game's folder means for a non-Steam game. "Start In" is the
+        fallback: it is normally the same folder, and it is what remains when
+        the target itself has gone missing.
+        """
+        try:
+            wanted = int(appid) & 0xFFFFFFFF
+        except ValueError:
+            return {"install": None, "name": None}
+
+        for entry in self._shortcut_entries():
+            if wanted not in self._shortcut_ids(entry):
+                continue
+
+            name = str(entry.get("appname") or "").strip() or None
+            exe = str(entry.get("exe") or "").strip().strip('"')
+            start_dir = str(entry.get("startdir") or "").strip().strip('"')
+
+            for candidate in (os.path.dirname(exe) if exe else "", start_dir):
+                if candidate and os.path.isdir(candidate):
+                    return {"install": os.path.realpath(candidate), "name": name}
+
+            return {"install": None, "name": name}
+
+        return {"install": None, "name": None}
+
+    async def get_game_folders(self, appid: str) -> dict:
+        appid = str(appid or "").strip()
+        if not appid.isdigit():
+            raise ValueError("AppID inválido")
+        return await asyncio.to_thread(self._game_folders, appid)
 
     # ------------------------------------------------------------------
     # Direct transfers between panels (do not touch the clipboard)
