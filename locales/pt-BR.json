@@ -125,7 +125,7 @@
   "recent.clear": "Limpar histórico",
   "editor.error_binary": "Este arquivo não é texto e não pode ser editado.",
   "editor.error_too_large": "Este arquivo é grande demais para editar (limite de 1 MB).",
-  "editor.hint": "Pressione A em uma linha para editá-la. As teclas abaixo digitam sem precisar do teclado da Steam.",
+  "editor.hint": "Pressione A em uma linha para editá-la. Salvar grava o arquivo; B volta.",
   "editor.edit_line": "Linha {number}",
   "editor.apply": "Aplicar",
   "editor.line_empty": "(linha vazia)",
@@ -133,5 +133,9 @@
   "editor.delete_line": "Excluir linha",
   "recent.failed": "Não foi possível carregar o histórico de pastas.",
   "editor.space": "Espaço",
-  "editor.clear_line": "Limpar"
+  "editor.clear_line": "Limpar",
+  "menu.recent_locations": "Locais recentes",
+  "editor.done": "Concluir",
+  "editor.position": "Lin {line}, Col {column}",
+  "editor.edit_hint": "Digite com as teclas abaixo. ◀ ▶ (ou L1/R1) movem o cursor, ▲ ▼ mudam de linha, ↵ divide a linha, B aplica e volta."
 }
