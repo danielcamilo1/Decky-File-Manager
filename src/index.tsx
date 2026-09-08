@@ -562,7 +562,17 @@ function SpeedGraph({ samples }: { samples: number[] }) {
 }
 
 /** The body of the progress modal: speed, graph, bar, and what is left. */
-function OperationProgress({ label, progress, transfer }: { label: string; progress: number; transfer?: TransferDetail }) {
+function OperationProgress({
+  label,
+  progress,
+  transfer,
+  done,
+}: {
+  label: string;
+  progress: number;
+  transfer?: TransferDetail;
+  done?: boolean;
+}) {
   // Only a tracked copy has anything to count; everything else keeps the
   // indeterminate bar it has always had.
   const detail = transfer && (transfer.counting || transfer.totalBytes > 0) ? transfer : null;
@@ -571,14 +581,16 @@ function OperationProgress({ label, progress, transfer }: { label: string; progr
   return (
     <div style={{ minWidth: 320, padding: "8px 0" }}>
       <div style={{ textAlign: "center", marginBottom: 10 }}>
-        <strong>{label}</strong>
+        <strong style={done ? { color: "#78d296" } : undefined}>
+          {done ? `\u2713 ${t("progress.complete")}` : label}
+        </strong>
       </div>
 
       {detail ? (
         <>
           <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 6 }}>
             <div style={{ fontSize: 22, fontWeight: 600, lineHeight: 1.1 }}>
-              {detail.counting ? t("progress.measuring") : formatSpeed(detail.speed)}
+              {done ? formatBytes(detail.totalBytes) : detail.counting ? t("progress.measuring") : formatSpeed(detail.speed)}
             </div>
             {detail.peak > 0 ? (
               <div style={{ fontSize: 11, opacity: 0.6 }}>
@@ -591,25 +603,34 @@ function OperationProgress({ label, progress, transfer }: { label: string; progr
       ) : null}
 
       <div style={{ height: 12, borderRadius: 999, background: "#2b2b2b", overflow: "hidden", marginTop: detail ? 10 : 0 }}>
-        <div style={{ height: "100%", width: `${progress}%`, background: "#4e8ad9", transition: "width 0.2s linear" }} />
+        <div
+          style={{
+            height: "100%",
+            width: `${progress}%`,
+            background: done ? "#5abe78" : "#4e8ad9",
+            transition: "width 0.2s linear",
+          }}
+        />
       </div>
 
       {detail ? (
         <>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginTop: 8, fontSize: 12 }}>
             <span>{`${progress}% · ${formatBytes(detail.copiedBytes)} / ${formatBytes(detail.totalBytes)}`}</span>
-            <span>
-              {filesLeft === 1
-                ? t("progress.file_left")
-                : t("progress.files_left").replace("{count}", String(filesLeft))}
-            </span>
+            {done ? null : (
+              <span>
+                {filesLeft === 1
+                  ? t("progress.file_left")
+                  : t("progress.files_left").replace("{count}", String(filesLeft))}
+              </span>
+            )}
           </div>
-          {detail.eta > 0 ? (
+          {!done && detail.eta > 0 ? (
             <div style={{ textAlign: "center", marginTop: 4, fontSize: 12, opacity: 0.6 }}>
               {t("progress.eta").replace("{time}", formatDuration(detail.eta))}
             </div>
           ) : null}
-          {detail.current ? (
+          {!done && detail.current ? (
             <div
               style={{
                 marginTop: 6,
@@ -2616,6 +2637,9 @@ function FileManagerPage() {
     label: string;
     progress: number;
     transfer?: TransferDetail;
+    // Set for the last moment of the modal's life, so a long copy ends on a
+    // "finished" beat rather than the window simply disappearing.
+    done?: boolean;
   } | null;
   type PermissionModalState = {
     message: string;
@@ -2627,7 +2651,11 @@ function FileManagerPage() {
   // The running operation captured whatever the state was when it started, so
   // the decision has to be readable from somewhere that does not go stale.
   const operationCancelRef = useRef(false);
+  // The modal lingers for a moment on "complete"; a B press in that moment
+  // is someone dismissing it, not cancelling anything.
+  const operationDoneRef = useRef(false);
   const requestOperationCancel = useCallback(() => {
+    if (operationDoneRef.current) return;
     operationCancelRef.current = true;
     setOperationCancelRequested(true);
     void cancelTransfer().catch(() => {
@@ -3146,7 +3174,13 @@ function FileManagerPage() {
       }
       isOperationRunning.current = true;
 
+      // A new operation supersedes whatever the last one had to say.
+      setError(null);
+      setNotice(null);
+      const startedAt = Date.now();
+
       operationCancelRef.current = false;
+      operationDoneRef.current = false;
       setOperationCancelRequested(false);
       setOperationModal({ label, progress: 0 });
       // The placeholder bar, for an operation with nothing to count. A copy
@@ -3167,6 +3201,9 @@ function FileManagerPage() {
       // two polls, which is also what makes the graph a graph.
       let poll = 0;
       let finished = false;
+      // The backend clears its counters the moment the copy returns, so the
+      // size it last reported is kept here for the summary.
+      let measuredBytes = 0;
       if (options?.tracked) {
         let lastBytes = 0;
         let lastAt = Date.now();
@@ -3180,6 +3217,7 @@ function FileManagerPage() {
           void (async () => {
             try {
               const snapshot = await getTransferProgress();
+              if (snapshot.total_bytes > 0) measuredBytes = snapshot.total_bytes;
               const now = Date.now();
               const seconds = Math.max((now - lastAt) / 1000, 0.001);
               const moved = Math.max(snapshot.copied_bytes - lastBytes, 0);
@@ -3246,6 +3284,7 @@ function FileManagerPage() {
         }
 
         finished = true;
+        operationDoneRef.current = true;
         stopTicker();
         if (poll) window.clearInterval(poll);
         setOperationModal((prev) =>
@@ -3253,6 +3292,7 @@ function FileManagerPage() {
             ? {
                 ...prev,
                 progress: 100,
+                done: true,
                 transfer: prev.transfer
                   ? { ...prev.transfer, copiedFiles: prev.transfer.totalFiles, copiedBytes: prev.transfer.totalBytes, eta: 0 }
                   : undefined,
@@ -3270,7 +3310,30 @@ function FileManagerPage() {
           panesRef.current[activePaneIndexRef.current].setFocusPath((res as any).new_path as string);
         }
 
-        window.setTimeout(() => setOperationModal(null), 220);
+        // The operation worked, so anything red still on the page is stale --
+        // a double press on the menu entry, for one, complains that another
+        // operation is running and would otherwise be waiting behind the
+        // modal when it closes.
+        setError(null);
+        if (options?.tracked) {
+          const moved = (res && typeof res === "object" && (res as any).kind) === "move";
+          const elapsed = (Date.now() - startedAt) / 1000;
+          showNotice(
+            measuredBytes > 0
+              ? t(moved ? "notice.move_done_detail" : "notice.copy_done_detail")
+                  .replace("{size}", formatBytes(measuredBytes))
+                  .replace("{time}", formatDuration(elapsed))
+              : t(moved ? "notice.move_done" : "notice.copy_done"),
+          );
+        }
+
+        // Long enough that "finished" is something the person sees, short
+        // enough that a rename still feels instant. Only this operation's own
+        // modal is closed: a later one would still be on its way up.
+        window.setTimeout(
+          () => setOperationModal((prev) => (prev && prev.done ? null : prev)),
+          options?.tracked ? 900 : 320,
+        );
         return res;
       } catch (e: any) {
         finished = true;
@@ -3290,7 +3353,7 @@ function FileManagerPage() {
         isOperationRunning.current = false;
       }
     },
-    [refreshClipboard, refreshPanes, refreshDrives, setError],
+    [refreshClipboard, refreshPanes, refreshDrives, setError, showNotice],
   );
 
   const handleOperationError = useCallback((e: any, fallbackKey: string) => {
@@ -4601,9 +4664,13 @@ function FileManagerPage() {
                       label={operationModal.label}
                       progress={operationModal.progress}
                       transfer={operationModal.transfer}
+                      done={operationModal.done}
                     />
                     <div style={{ display: "flex", justifyContent: "center", marginTop: 16 }}>
-                      <DialogButton onClick={requestOperationCancel} disabled={operationCancelRequested}>
+                      <DialogButton
+                        onClick={requestOperationCancel}
+                        disabled={operationCancelRequested || Boolean(operationModal.done)}
+                      >
                         {operationCancelRequested ? t("action.cancelling") : t("action.cancel")}
                       </DialogButton>
                     </div>

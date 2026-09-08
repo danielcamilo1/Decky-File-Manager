@@ -860,7 +860,13 @@ class Plugin:
         self._clipboard_path = None
         self._clipboard_kind = None
         self._save_runtime_state()
-        return {"ok": True, "conflict_strategy": conflict_strategy}
+        # "kind" is what the frontend names the finished operation with: the
+        # clipboard is cleared by the time it could ask.
+        return {
+            "ok": True,
+            "conflict_strategy": conflict_strategy,
+            "kind": "copy" if kind == "copy" else "move",
+        }
 
     async def create_folder(self, parent_dir: str, name: str) -> dict:
         parent_dir = self._normalize_dir(parent_dir)
@@ -2636,7 +2642,13 @@ class Plugin:
             self._clipboard_kind = None
             self._save_runtime_state()
 
-        return {"ok": True, "success": True, "new_path": replacing or dst, "conflict_strategy": conflict_strategy}
+        return {
+            "ok": True,
+            "success": True,
+            "new_path": replacing or dst,
+            "conflict_strategy": conflict_strategy,
+            "kind": "copy" if mode == "copy" else "move",
+        }
 
     async def long_running(self):
         await asyncio.sleep(15)
