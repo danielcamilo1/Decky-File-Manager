@@ -393,6 +393,9 @@ type RecentEntry = {
 type DriveKind = "home" | "root" | "sdcard" | "usb" | "internal";
 
 type DriveEntry = {
+  // Stable across replugs and remounts (the filesystem UUID where there is
+  // one), so a drive kept hidden stays hidden when it comes back.
+  id: string;
   name: string;
   path: string;
   kind: DriveKind;
@@ -404,6 +407,10 @@ type DriveEntry = {
   // unknown until it is mounted.
   mounted?: boolean;
   fstype?: string | null;
+  // Part of the installed system - a rootfs slot, an EFI partition, anything
+  // on the disk SteamOS boots from. Listed, but left out of the bar until the
+  // user asks for it.
+  system?: boolean;
 };
 
 function isArchiveFile(name: string): boolean {
@@ -564,6 +571,47 @@ function savePreferences(preferences: Preferences): void {
     // As with the recent list: a full or unavailable store is not worth
     // breaking browsing over.
   }
+}
+
+/**
+ * Which drives the bar shows.
+ *
+ * Only the *departures* from the default are stored, as id -> shown, so a
+ * volume the user never had an opinion about follows the default (removable
+ * media and home yes, the machine's own partitions no) even after an update
+ * changes what that default is.
+ */
+const DRIVE_VISIBILITY_STORAGE_KEY = "decky-file-manager:drive-visibility";
+
+type DriveVisibility = Record<string, boolean>;
+
+function loadDriveVisibility(): DriveVisibility {
+  try {
+    const raw = window.localStorage.getItem(DRIVE_VISIBILITY_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    const out: DriveVisibility = {};
+    for (const [id, shown] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof shown === "boolean") out[id] = shown;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function saveDriveVisibility(visibility: DriveVisibility): void {
+  try {
+    window.localStorage.setItem(DRIVE_VISIBILITY_STORAGE_KEY, JSON.stringify(visibility));
+  } catch {
+    // Not worth breaking the bar over.
+  }
+}
+
+function isDriveShown(drive: DriveEntry, visibility: DriveVisibility): boolean {
+  const override = drive.id ? visibility[drive.id] : undefined;
+  return override === undefined ? !drive.system : override;
 }
 
 function recordRecentPath(path: string): string[] {
@@ -797,6 +845,84 @@ function DriveChip({
           <span style={{ fontSize: 10, opacity: 0.6, whiteSpace: "nowrap" }}>{subtitle}</span>
         ) : null}
       </div>
+    </Focusable>
+  );
+}
+
+/**
+ * One volume in the "Manage drives" list.
+ *
+ * Deliberately a plain row with its own checkbox rather than a toggle field:
+ * the list has to show what each volume *is* - device node, size, where it is
+ * mounted - for the internal partitions to be tellable apart at all, and A on
+ * the row is the whole interaction.
+ */
+function DriveVisibilityRow({
+  drive,
+  shown,
+  onToggle,
+}: {
+  drive: DriveEntry;
+  shown: boolean;
+  onToggle: (drive: DriveEntry) => void;
+}) {
+  const activate = useCallback(() => onToggle(drive), [drive, onToggle]);
+  const details = [
+    drive.device ?? null,
+    drive.fstype ?? null,
+    drive.total !== null ? formatBytes(drive.total) : null,
+    drive.mounted === false ? t("drive.not_mounted") : drive.path,
+  ]
+    .filter((part): part is string => !!part)
+    .join(" · ");
+
+  return (
+    <Focusable
+      onActivate={activate}
+      onClick={activate}
+      focusWithinClassName="gpfocuswithin"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        padding: "8px 10px",
+        borderRadius: 4,
+        cursor: "pointer",
+        background: "rgba(255,255,255,0.04)",
+      }}
+    >
+      <div
+        style={{
+          width: 20,
+          height: 20,
+          flexShrink: 0,
+          borderRadius: 3,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: 13,
+          lineHeight: 1,
+          border: `1px solid ${shown ? "rgba(120,180,255,0.9)" : "rgba(255,255,255,0.35)"}`,
+          background: shown ? "rgba(120,180,255,0.85)" : "transparent",
+          color: shown ? "#0b1521" : "transparent",
+        }}
+      >
+        ✓
+      </div>
+      {driveIconFor(drive.kind)}
+      <div style={{ display: "flex", flexDirection: "column", minWidth: 0, flex: 1, lineHeight: 1.25 }}>
+        <span style={{ fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {driveLabelFor(drive)}
+        </span>
+        <span style={{ fontSize: 10, opacity: 0.6, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {details}
+        </span>
+      </div>
+      {drive.system ? (
+        <span style={{ fontSize: 9, letterSpacing: 0.5, opacity: 0.55, textTransform: "uppercase", flexShrink: 0 }}>
+          {t("drives.system")}
+        </span>
+      ) : null}
     </Focusable>
   );
 }
@@ -1639,6 +1765,38 @@ function FileManagerPage() {
   const [drives, setDrives] = useState<DriveEntry[]>([]);
   const [mountingDevice, setMountingDevice] = useState<string | null>(null);
   const mountingDeviceRef = useRef<string | null>(null);
+  const [driveVisibility, setDriveVisibility] = useState<DriveVisibility>(loadDriveVisibility);
+  const [manageDrivesRequested, setManageDrivesRequested] = useState(false);
+  const manageDrivesModalRef = useRef<HTMLDivElement | null>(null);
+
+  // What the bar and the Y menu offer. `drives` keeps everything the backend
+  // found, because the manage list has to be able to show a hidden volume.
+  const visibleDrives = useMemo(
+    () => drives.filter((drive) => isDriveShown(drive, driveVisibility)),
+    [drives, driveVisibility],
+  );
+
+  const toggleDriveShown = useCallback((drive: DriveEntry) => {
+    setDriveVisibility((previous) => {
+      const next = { ...previous };
+      const shown = isDriveShown(drive, previous);
+      // Only a departure from the default is worth storing: flipping a drive
+      // back to what it would do on its own drops the override instead of
+      // freezing today's default into the store.
+      // `shown !== system` means the drive is currently sitting at its
+      // default, so the toggle is a departure and has to be recorded; the
+      // other way round it is a return to the default, and the override goes.
+      if (shown !== !!drive.system) next[drive.id] = !shown;
+      else delete next[drive.id];
+      saveDriveVisibility(next);
+      return next;
+    });
+  }, []);
+
+  const resetDriveVisibility = useCallback(() => {
+    setDriveVisibility({});
+    saveDriveVisibility({});
+  }, []);
   const [showHidden, setShowHidden] = useState(storedPreferences.current.showHidden);
   const [sortOrder, setSortOrder] = useState(storedPreferences.current.sortOrder);
   const [fileTypeFilter, setFileTypeFilter] = useState(storedPreferences.current.fileTypeFilter);
@@ -2148,7 +2306,7 @@ function FileManagerPage() {
   const createFileRef = useRef<HTMLDivElement | null>(null);
   const createFileConfirmRef = useRef<HTMLButtonElement | null>(null);
   const fileManagerScopeRef = useRef<HTMLDivElement | null>(null);
-  const hasActiveModal = renameRequested || deleteRequested || propertiesRequested || createFolderRequested || createFileRequested || !!conflictModal || !!operationModal || !!permissionModal;
+  const hasActiveModal = renameRequested || deleteRequested || propertiesRequested || createFolderRequested || createFileRequested || manageDrivesRequested || !!conflictModal || !!operationModal || !!permissionModal;
   hasActiveModalRef.current = hasActiveModal;
 
   // Steam dismisses a modal on the B *press*, through the Focusable's own
@@ -2303,8 +2461,8 @@ function FileManagerPage() {
       }
     }
 
-    return propertiesRequested || renameRequested || deleteRequested || createFolderRequested || createFileRequested || !!conflictModal || !!operationModal || !!permissionModal;
-  }, [propertiesRequested, renameRequested, deleteRequested, createFolderRequested, createFileRequested, conflictModal, operationModal, permissionModal]);
+    return propertiesRequested || renameRequested || deleteRequested || createFolderRequested || createFileRequested || manageDrivesRequested || !!conflictModal || !!operationModal || !!permissionModal;
+  }, [propertiesRequested, renameRequested, deleteRequested, createFolderRequested, createFileRequested, manageDrivesRequested, conflictModal, operationModal, permissionModal]);
 
   useEffect(() => {
     const input = (window as any).SteamClient?.Input;
@@ -2497,6 +2655,19 @@ function FileManagerPage() {
       }, 50);
     }
   }, [renameRequested]);
+
+  useEffect(() => {
+    if (manageDrivesRequested) {
+      setTimeout(() => {
+        const first = manageDrivesModalRef.current?.querySelector<HTMLElement>("[tabindex], button");
+        try {
+          first?.focus();
+        } catch (e) {
+          void e;
+        }
+      }, 50);
+    }
+  }, [manageDrivesRequested]);
 
   useEffect(() => {
     if (propertiesRequested) {
@@ -3245,8 +3416,11 @@ function FileManagerPage() {
               <span style={{ display: "flex", alignItems: "center", gap: 10 }}><SplitViewIcon />{splitOn ? t("menu.split_view_close") : t("menu.split_view")}</span>
             </MenuItem>
             {recentLocations}
-            {drives.length ? <MenuSeparator /> : null}
-            {drives.map((drive) => {
+            <MenuItem onClick={() => setManageDrivesRequested(true)} onSelected={() => setManageDrivesRequested(true)}>
+              <span style={{ display: "flex", alignItems: "center", gap: 10 }}><DriveIcon />{t("menu.manage_drives")}</span>
+            </MenuItem>
+            {visibleDrives.length ? <MenuSeparator /> : null}
+            {visibleDrives.map((drive) => {
               const go = () => goToDrive(drive);
               const label = drive.mounted === false ? t("menu.mount_drive").replace("{name}", driveLabelFor(drive)) : driveLabelFor(drive);
               return (
@@ -3275,6 +3449,7 @@ function FileManagerPage() {
       cutPath,
       deletePath,
       drives,
+      visibleDrives,
       ejectDrive,
       extractArchive,
       getDirectorySize,
@@ -3532,7 +3707,7 @@ function FileManagerPage() {
               </div>
 
               <DrivesBar
-                drives={drives}
+                drives={visibleDrives}
                 currentPath={activePane.path}
                 mountingDevice={mountingDevice}
                 onSelect={goToDrive}
@@ -3920,6 +4095,50 @@ function FileManagerPage() {
                       </DialogButton>
                     </div>
                   </div>
+                </ModalFocusScope>
+              </DialogBody>
+            </ModalRoot>
+          )}
+
+          {manageDrivesRequested && (
+            <ModalRoot
+              show={true}
+              bHideMainWindowForPopouts={true}
+              onCancel={() => setManageDrivesRequested(false)}
+            >
+              <DialogBody>
+                <ModalFocusScope>
+                  <div style={{ textAlign: "center", paddingBottom: 4 }}>
+                    <h1 style={{ margin: 0 }}>{t("modal.manage_drives")}</h1>
+                    <div style={{ fontSize: 12, opacity: 0.6, padding: "6px 0 2px" }}>{t("drives.manage_hint")}</div>
+                  </div>
+                  <Focusable
+                    onCancel={() => setManageDrivesRequested(false)}
+                    onCancelButton={() => setManageDrivesRequested(false)}
+                    style={{ outline: "none" }}
+                  >
+                    <div
+                      ref={manageDrivesModalRef}
+                      style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: "46vh", overflowY: "auto", padding: "4px 2px" }}
+                    >
+                      {drives.length ? (
+                        drives.map((drive) => (
+                          <DriveVisibilityRow
+                            key={drive.id || drive.path}
+                            drive={drive}
+                            shown={isDriveShown(drive, driveVisibility)}
+                            onToggle={toggleDriveShown}
+                          />
+                        ))
+                      ) : (
+                        <div style={{ opacity: 0.6, fontSize: 13, padding: "8px 2px" }}>{t("drives.none")}</div>
+                      )}
+                    </div>
+                    <div style={{ display: "flex", gap: 12, justifyContent: "center", marginTop: 14 }}>
+                      <DialogButton onClick={resetDriveVisibility}>{t("action.reset")}</DialogButton>
+                      <DialogButton onClick={() => setManageDrivesRequested(false)}>{t("action.close")}</DialogButton>
+                    </div>
+                  </Focusable>
                 </ModalFocusScope>
               </DialogBody>
             </ModalRoot>

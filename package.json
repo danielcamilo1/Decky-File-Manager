@@ -1,6 +1,6 @@
 {
   "name": "decky-file-manager",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "description": "Gerenciador de arquivos para do Decky",
   "type": "module",
   "scripts": {

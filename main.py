@@ -901,6 +901,87 @@ class Plugin:
                 return bus
         return ""
 
+    @staticmethod
+    def _parent_disk(device: str) -> str:
+        """The whole-disk device a partition belongs to ("sda1" -> "sda")."""
+        base = os.path.basename(os.path.realpath(device))
+        if not base:
+            return ""
+        # /sys/class/block/sda1 resolves into .../block/sda/sda1, so the disk
+        # is simply the directory above - no name-mangling guesswork, which
+        # matters for nvme0n1p3 and mmcblk0p8.
+        real = os.path.realpath(os.path.join("/sys/class/block", base))
+        if os.path.exists(os.path.join(real, "partition")):
+            parent = os.path.basename(os.path.dirname(real))
+            if parent:
+                return parent
+        return base
+
+    # Mount points that only ever belong to the installed system. A disk
+    # carrying one of these is the machine's own, and none of its partitions
+    # are drives the user plugged in.
+    _SYSTEM_MOUNT_ROOTS = (
+        "/boot", "/efi", "/esp", "/var", "/usr", "/sysroot", "/home",
+        "/etc", "/opt", "/nix", "/ostree", "/srv", "/root",
+    )
+
+    # Partition types that hold no browsable user data, by GPT GUID and by
+    # the MBR type byte udev reports for a DOS partition table.
+    _SYSTEM_PARTITION_TYPES = {
+        "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",  # EFI system
+        "e3c9e316-0b5c-4db8-817d-f92df00215ae",  # Microsoft reserved
+        "de94bba4-06d1-4d40-a16a-bfd50179d6ac",  # Windows recovery
+        "0657fd6d-a4ab-43c4-84e5-0933c84b4f4f",  # Linux swap
+        "21686148-6449-6e6f-744e-656564454649",  # BIOS boot
+        "0xef", "0x82", "0x27",
+    }
+
+    def _system_disks(self) -> set:
+        """Disks the running system lives on, by whole-disk device name.
+
+        Everything on them - the rootfs slots, /var, /esp, /home - is the
+        machine's own storage rather than something the user plugged in, so
+        the drives bar hides it unless asked otherwise. Derived from where
+        things are mounted rather than from a device whitelist, which is what
+        makes it work the same on a 64GB eMMC Deck and an NVMe one.
+        """
+        disks: set = set()
+        try:
+            with open("/proc/mounts", "r", encoding="utf-8") as f:
+                lines = f.readlines()
+        except OSError:
+            return disks
+
+        for line in lines:
+            parts = line.split()
+            if len(parts) < 3:
+                continue
+            device = self._unescape_mount_field(parts[0])
+            point = self._unescape_mount_field(parts[1])
+            if not device.startswith("/dev/"):
+                continue
+            if point != "/" and not point.startswith(self._SYSTEM_MOUNT_ROOTS):
+                continue
+            disk = self._parent_disk(device)
+            if disk:
+                disks.add(disk)
+        return disks
+
+    @staticmethod
+    def _drive_id(props: dict, device: str | None, path: str) -> str:
+        """A name for a volume that survives a replug and a remount.
+
+        The filesystem UUID first: a stick keeps it whichever port it lands
+        in, and whatever mount point udisks picks this time. The device node
+        and the mount point are only fallbacks.
+        """
+        uuid = props.get("ID_FS_UUID") if props else None
+        if uuid:
+            return f"uuid:{uuid}"
+        if device:
+            return f"dev:{os.path.realpath(device)}"
+        return f"path:{path}"
+
     def _disk_usage(self, path: str) -> tuple:
         try:
             stat = os.statvfs(path)
@@ -910,9 +991,19 @@ class Plugin:
         free = stat.f_bavail * stat.f_frsize
         return (total, free)
 
-    def _make_drive(self, path: str, name: str, kind: str, device: str | None = None, fstype: str | None = None) -> dict:
+    def _make_drive(
+        self,
+        path: str,
+        name: str,
+        kind: str,
+        device: str | None = None,
+        fstype: str | None = None,
+        drive_id: str | None = None,
+        system: bool = False,
+    ) -> dict:
         total, free = self._disk_usage(path)
         return {
+            "id": drive_id or f"path:{path}",
             "name": name,
             "path": path,
             "kind": kind,
@@ -921,6 +1012,10 @@ class Plugin:
             "free": free,
             "mounted": True,
             "fstype": fstype,
+            # A volume belonging to the installed system rather than to the
+            # user. Still listed, so it can be turned back on by hand, but
+            # the bar leaves it out until then.
+            "system": system,
         }
 
     def _collect_drives(self) -> list:
@@ -928,21 +1023,30 @@ class Plugin:
         seen: set = set()
         seen_devices: set = set()
 
-        def add(path: str, name: str, kind: str, device: str | None = None, fstype: str | None = None) -> None:
+        def add(
+            path: str,
+            name: str,
+            kind: str,
+            device: str | None = None,
+            fstype: str | None = None,
+            drive_id: str | None = None,
+            system: bool = False,
+        ) -> None:
             if not path or not os.path.isdir(path):
                 return
             real = os.path.realpath(path)
             if real in seen:
                 return
             seen.add(real)
-            drives.append(self._make_drive(path, name, kind, device, fstype))
+            drives.append(self._make_drive(path, name, kind, device, fstype, drive_id, system))
 
         home = os.environ.get("DECKY_USER_HOME") or os.path.expanduser("~")
         if not os.path.isdir(home):
             home = "/home/deck"
-        add(home, os.path.basename(home.rstrip("/")) or "home", "home")
+        add(home, os.path.basename(home.rstrip("/")) or "home", "home", drive_id="home")
 
         labels = self._device_labels()
+        system_disks = self._system_disks()
 
         try:
             with open("/proc/mounts", "r", encoding="utf-8") as f:
@@ -975,6 +1079,7 @@ class Plugin:
             in_media_dir = mount_point.startswith(self._REMOVABLE_MOUNT_ROOTS)
             removable = self._is_removable_device(device)
             bus = self._sysfs_bus(device)
+            on_system_disk = self._parent_disk(device) in system_disks
             if not (in_media_dir or removable is True or bus == "usb"):
                 continue
 
@@ -985,7 +1090,13 @@ class Plugin:
             seen_devices.add(real_device)
 
             base_device = os.path.basename(real_device)
-            if base_device.startswith("mmcblk") or bus == "mmc":
+            props = self._udev_properties(os.path.join("/sys/class/block", base_device))
+            if on_system_disk:
+                # The machine's own storage, wherever it happens to be
+                # mounted - an eMMC Deck calls its internal disk mmcblk0,
+                # which would otherwise pass for an SD card.
+                kind = "internal"
+            elif base_device.startswith("mmcblk") or bus == "mmc":
                 kind = "sdcard"
             elif bus == "usb" or removable is True:
                 kind = "usb"
@@ -994,9 +1105,10 @@ class Plugin:
                 kind = "internal"
 
             name = labels.get(real_device) or os.path.basename(mount_point.rstrip("/")) or base_device
-            add(mount_point, name, kind, device, fs_type)
+            system = on_system_disk or (props.get("ID_PART_ENTRY_TYPE") or "").lower() in self._SYSTEM_PARTITION_TYPES
+            add(mount_point, name, kind, device, fs_type, self._drive_id(props, device, mount_point), system)
 
-        add("/", "/", "root")
+        add("/", "/", "root", drive_id="root")
 
         priority = {"home": 0, "sdcard": 1, "usb": 2, "internal": 3, "root": 4}
         drives.sort(key=lambda d: (priority.get(d["kind"], 5), d["name"].lower()))
@@ -1114,6 +1226,7 @@ class Plugin:
         """
         mounted = self._mount_points()
         labels = self._device_labels()
+        system_disks = self._system_disks()
         drives: list = []
 
         try:
@@ -1148,13 +1261,16 @@ class Plugin:
             id_bus = (props.get("ID_BUS") or "").lower()
             bus = id_bus or self._sysfs_bus(device)
             removable = self._is_removable_device(device)
-            is_card = base.startswith("mmcblk") or bus == "mmc"
-            is_usb = bus == "usb"
-            # Removable media, an SD card, or anything on the USB bus. An idle
-            # internal partition stays out: the plugin has no business
-            # mounting a system volume the OS deliberately left alone.
+            on_system_disk = self._parent_disk(device) in system_disks
+            is_usb = bus == "usb" and not on_system_disk
+            is_card = not on_system_disk and (base.startswith("mmcblk") or bus == "mmc")
+            # Everything with a filesystem is listed, the machine's own
+            # partitions included — they are marked `system` and the bar hides
+            # them by default, but they have to be in the list for the user to
+            # be able to turn one back on.
+            system = on_system_disk or (props.get("ID_PART_ENTRY_TYPE") or "").lower() in self._SYSTEM_PARTITION_TYPES
             if not (is_usb or is_card or removable is True):
-                continue
+                system = True
 
             usage = props.get("ID_FS_USAGE")
             fstype = props.get("ID_FS_TYPE") or None
@@ -1175,9 +1291,10 @@ class Plugin:
                 continue
 
             label = self._unescape_udev(props.get("ID_FS_LABEL_ENC") or props.get("ID_FS_LABEL") or "")
-            kind = "sdcard" if is_card else ("usb" if is_usb or removable is True else "internal")
+            kind = "sdcard" if is_card else ("usb" if is_usb or (removable is True and not on_system_disk) else "internal")
 
             drives.append({
+                "id": self._drive_id(props, device, ""),
                 "name": label or labels.get(real) or base,
                 "path": "",
                 "kind": kind,
@@ -1186,6 +1303,7 @@ class Plugin:
                 "free": None,
                 "mounted": False,
                 "fstype": fstype,
+                "system": system,
             })
 
         return drives
@@ -1229,6 +1347,15 @@ class Plugin:
             return target
         return None
 
+    def _ownership_options(self) -> str:
+        """uid/gid/umask for the user, so a Windows volume is writable."""
+        home = os.environ.get("DECKY_USER_HOME") or os.path.expanduser("~")
+        try:
+            info = os.stat(home)
+        except OSError:
+            return ""
+        return f"uid={info.st_uid},gid={info.st_gid},umask=022"
+
     def _mount_options_for(self, fstype: str | None) -> list:
         """Ownership options a Windows-formatted volume needs to be usable.
 
@@ -1237,23 +1364,38 @@ class Plugin:
         """
         if fstype not in ("vfat", "exfat", "ntfs", "ntfs3", "msdos"):
             return []
-        home = os.environ.get("DECKY_USER_HOME") or os.path.expanduser("~")
-        try:
-            info = os.stat(home)
-        except OSError:
-            return []
-        return ["-o", f"uid={info.st_uid},gid={info.st_gid},umask=022"]
+        options = self._ownership_options()
+        return ["-o", options] if options else []
+
+    @staticmethod
+    def _summarize_output(text: str) -> str:
+        """One readable line out of a mount helper's complaint."""
+        collapsed = " ".join(text.split())
+        # udisks wraps everything in a D-Bus error name; the sentence after it
+        # is the part a person can act on.
+        marker = "GDBus.Error:"
+        if marker in collapsed:
+            tail = collapsed.split(marker, 1)[1]
+            if ": " in tail:
+                collapsed = tail.split(": ", 1)[1]
+        return collapsed[:240]
 
     def _mount_device(self, device: str) -> str:
         """Mount a volume and answer with where it landed.
 
-        Three helpers are tried in turn rather than one: udisks2 is the one
-        that can work without root (it is what the desktop uses, and it picks
-        both the mount point and the ownership options), systemd-mount covers
-        images where udisks is absent, and plain mount(8) is the last resort
-        for an install that does run privileged. Whether any of them worked is
-        read back off /proc/mounts rather than parsed out of their output,
-        which differs between versions.
+        Several helpers are tried in turn rather than one. udisks2 is the only
+        one with a real chance without root - it is what the desktop uses, and
+        it picks both the mount point and the ownership options; ntfs-3g is
+        worth a try for a Windows volume because FUSE mounts can be permitted
+        for a normal user; systemd-mount and plain mount(8) cover an install
+        that does run privileged. Whether any of them worked is read back off
+        /proc/mounts rather than parsed out of their output, which differs
+        between versions.
+
+        Every attempt is kept, and the failure carries all of them: which tool
+        refused and in whose words is the only thing that distinguishes "the
+        policy would not let us" from "Windows left this volume dirty", and
+        neither is guessable from here.
         """
         if not device.startswith("/dev/"):
             raise ValueError(f"Dispositivo inválido: {device}")
@@ -1265,48 +1407,85 @@ class Plugin:
         if existing:
             return existing
 
-        problems: list = []
+        props = self._udev_properties(os.path.join("/sys/class/block", os.path.basename(real)))
+        fstype = props.get("ID_FS_TYPE") or ""
+        label = self._unescape_udev(props.get("ID_FS_LABEL_ENC") or props.get("ID_FS_LABEL") or "")
+        attempts: list = []
 
-        for command in (
-            ["udisksctl", "mount", "--no-user-interaction", "-b", device],
-            ["systemd-mount", "--no-ask-password", "--collect", device],
-        ):
+        def try_command(command: list) -> str | None:
             code, out, err = self._run_command(command)
             if code is None and not err:
-                continue  # not installed
+                return None  # the tool is not installed here
             point = self._mount_points().get(real)
             if point:
                 return point
-            problems.append((err or out).strip())
+            attempts.append((os.path.basename(command[0]), self._summarize_output(err or out or f"exit {code}")))
+            return None
 
-        props = self._udev_properties(os.path.join("/sys/class/block", os.path.basename(real)))
-        label = self._unescape_udev(props.get("ID_FS_LABEL_ENC") or props.get("ID_FS_LABEL") or "")
+        point = try_command(["udisksctl", "mount", "--no-user-interaction", "-b", device])
+        if point:
+            return point
+
+        # udisks refuses a volume whose type it could not settle on, which is
+        # the usual answer for NTFS on an image that has both the kernel
+        # driver and the FUSE one; naming the driver gets past it.
+        if fstype in ("ntfs", "ntfs3"):
+            for driver in ("ntfs3", "ntfs-3g"):
+                point = try_command(
+                    ["udisksctl", "mount", "--no-user-interaction", "-b", device, "-t", driver]
+                )
+                if point:
+                    return point
+
+        # A Windows volume that was hibernated or unmounted uncleanly is
+        # refused by every driver until someone says otherwise; ntfs-3g is the
+        # one that can be told to, and it runs in userspace.
+        if fstype in ("ntfs", "ntfs3"):
+            target = self._mount_target_dir(label or os.path.basename(real))
+            if target:
+                info = self._ownership_options()
+                point = try_command(
+                    ["ntfs-3g", "-o", "remove_hiberfile,recover" + (f",{info}" if info else ""), device, target]
+                )
+                if point:
+                    return point
+                self._discard_target_dir(target)
+
+        point = try_command(["systemd-mount", "--no-ask-password", "--collect", device])
+        if point:
+            return point
+
         target = self._mount_target_dir(label or os.path.basename(real))
         if target:
-            code, out, err = self._run_command(
-                ["mount"] + self._mount_options_for(props.get("ID_FS_TYPE")) + [device, target]
-            )
-            point = self._mount_points().get(real)
+            point = try_command(["mount"] + self._mount_options_for(fstype) + [device, target])
             if point:
                 return point
-            if code is not None or err:
-                problems.append((err or out).strip())
-            # Nothing was mounted here after all; take the directory back,
-            # and its parent too when this call is what created it.
-            for leftover in (target, os.path.dirname(target)):
-                try:
-                    os.rmdir(leftover)
-                except OSError:
-                    break
+            # Nothing was mounted here after all; take the directory back.
+            self._discard_target_dir(target)
 
-        detail = next((problem for problem in problems if problem), "")
-        if not problems:
+        if not attempts:
             raise RuntimeError(f"Nenhuma ferramenta de montagem disponível para {device}")
-        if any(self._looks_like_denial(problem) for problem in problems):
-            raise PermissionError(
-                f"Sem permissão para montar {device}: {detail}" if detail else f"Sem permissão para montar {device}"
-            )
-        raise RuntimeError(f"Não foi possível montar {device}: {detail}" if detail else f"Não foi possível montar {device}")
+
+        # The same helper often refuses the same way several times over (the
+        # NTFS retries above); say it once.
+        unique: list = []
+        for tool, message in attempts:
+            entry = f"{tool}: {message}"
+            if message and entry not in unique:
+                unique.append(entry)
+        detail = "; ".join(unique[:3])
+        if any(self._looks_like_denial(message) for _, message in attempts):
+            raise PermissionError(f"Sem permissão para montar {device}: {detail}")
+        raise RuntimeError(f"Não foi possível montar {device}: {detail}")
+
+    @staticmethod
+    def _discard_target_dir(target: str) -> None:
+        """Give back a mount directory this plugin created and did not use."""
+        for leftover in (target, os.path.dirname(target)):
+            try:
+                os.rmdir(leftover)
+            except OSError:
+                break
 
     def _unmount_target(self, target: str) -> str:
         """Unmount a device or a mount point, and answer with the freed path."""
@@ -1374,7 +1553,12 @@ class Plugin:
         unmounted = await asyncio.to_thread(self._collect_unmounted_drives)
         entries = drives + unmounted
         priority = {"home": 0, "sdcard": 1, "usb": 2, "internal": 3, "root": 4}
-        entries.sort(key=lambda d: (priority.get(d["kind"], 5), 0 if d.get("mounted", True) else 1, d["name"].lower()))
+        entries.sort(key=lambda d: (
+            1 if d.get("system") else 0,
+            priority.get(d["kind"], 5),
+            0 if d.get("mounted", True) else 1,
+            d["name"].lower(),
+        ))
         return {"drives": entries}
 
     # ------------------------------------------------------------------
