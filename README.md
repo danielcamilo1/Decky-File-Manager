@@ -31,7 +31,13 @@ A native, controller-friendly file manager for SteamOS Gaming Mode. Browse, copy
 * **Browse a game's files from its Steam menu** — **Browse local files** on any game opens its installation folder or Proton compatdata. Non-Steam shortcuts included.
 * **Drive shortcuts** — SD card, USB and external drives with free space, above the list; system partitions filtered out.
 * **Mount a drive from Gaming Mode** — a USB stick plugged in while the plugin is open shows up on its own as a dashed chip; pressing it mounts the drive and opens it. **Eject drive** in the **Y** menu unmounts it again before you pull it out.
-  Mounting takes a one-time permission: the system grants it to a desktop session, and Gaming Mode plugins run outside one. The first time a mount is refused, the plugin writes `~/decky-file-manager-enable-mounting.sh` and shows you the command to run it with in Desktop Mode. It installs a single polkit rule letting your user mount removable volumes, and `sudo rm /etc/polkit-1/rules.d/50-decky-file-manager.rules` undoes it.
+  Mounting takes a one-time permission: the system grants it to a desktop session, and Gaming Mode plugins run outside one. The first time a mount is refused you get an **Allow mounting** button, and the drive opens straight after. **Revoke mount permission** on the drives screen takes it back.
+
+### About the root flag
+
+The plugin declares Decky's `root` flag, and then gives root away in its first milliseconds — before it can touch a single file. What it keeps is one small child process that understands two words, *install* and *remove*, and can write or delete exactly one file: a polkit rule at `/etc/polkit-1/rules.d/50-decky-file-manager.rules` that lets **your user** mount removable volumes, the same permission Desktop Mode already has. It is written only when you press the button.
+
+Every file operation — copy, move, delete, rename, extract, save — runs as you, not as root, so nothing it creates ends up root-owned and out of reach of Steam. The flag exists because mounting a drive is impossible without it, not to give the file manager the run of the system.
 * **Choose which drives you see** — **Manage drives** in the **Y** menu lists every volume the Deck can see, with a checkbox each. Removable media and your home folder are on by default and the system's own partitions are off; the choice is remembered per drive.
 * File and folder management, archive extraction (zip, tar and variants), multi-language support.
 * Designed for SteamOS and Bazzite. Lightweight, and SteamOS-inspired throughout.

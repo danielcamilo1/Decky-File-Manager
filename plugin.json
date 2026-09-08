@@ -1,7 +1,7 @@
 {
   "name": "Decky File Manager",
   "author": "Ciphay",
-  "flags": [],
+  "flags": ["root"],
   "api_version": 2,
   "publish": {
     "tags": ["file-manager"],

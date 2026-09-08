@@ -501,6 +501,20 @@ const prepareMountPermission = callable<
   [],
   { success: boolean; path: string; command: string; detail: string; installed: boolean }
 >("prepare_mount_permission");
+/**
+ * Mounting needs a permission the plugin can grant itself: Decky starts it as
+ * root, it hands root straight back, and a small helper process keeps just
+ * enough to write (or delete) the one polkit rule that allows it.
+ */
+const getMountPermission = callable<[], { installed: boolean; can_install: boolean; user: string }>(
+  "get_mount_permission",
+);
+const installMountPermission = callable<[], { success: boolean; detail: string; installed: boolean }>(
+  "install_mount_permission",
+);
+const removeMountPermission = callable<[], { success: boolean; detail: string; installed: boolean }>(
+  "remove_mount_permission",
+);
 const unmountDrive = callable<[string], DeviceResult>("unmount_drive");
 
 // How often the drives bar re-reads the block devices, so a stick plugged in
@@ -1806,10 +1820,23 @@ function FileManagerPage() {
   // Shown when a mount is refused by the system's own policy rather than by
   // the drive: that is the one mount failure the person holding the Deck can
   // actually do something about, so it gets a screen instead of a red line.
-  const [mountPermission, setMountPermission] = useState<
-    { detail: string; command: string; path: string; installed: boolean; error: string } | null
-  >(null);
+  const [mountPermission, setMountPermission] = useState<{
+    detail: string;
+    device: string;
+    command: string;
+    path: string;
+    installed: boolean;
+    canInstall: boolean;
+    error: string;
+    busy: boolean;
+  } | null>(null);
   const mountPermissionModalRef = useRef<HTMLDivElement | null>(null);
+  // Whether the permission is in place, for the Manage drives footer: it is
+  // the only way back out once mounting has been allowed.
+  const [mountPermissionState, setMountPermissionState] = useState<{ installed: boolean; canInstall: boolean }>({
+    installed: false,
+    canInstall: false,
+  });
 
   // What the bar and the Y menu offer. `drives` keeps everything the backend
   // found, because the manage list has to be able to show a hidden volume.
@@ -2131,6 +2158,36 @@ function FileManagerPage() {
     return () => window.clearInterval(timer);
   }, [refreshDrives]);
 
+  /**
+   * Mount a plugged-in volume and open it. Split out from the drive handler
+   * because the permission screen retries it: once mounting has been allowed,
+   * the drive the person originally pressed should just open.
+   */
+  const mountAndOpen = useCallback(
+    async (device: string) => {
+      const pane = panesRef.current[activePaneIndexRef.current];
+      if (!device || mountingDeviceRef.current) return;
+      mountingDeviceRef.current = device;
+      setMountingDevice(device);
+      try {
+        const res = await mountDrive(device);
+        await refreshDrives();
+        if (res && res.success && res.path) {
+          await pane.loadPath(res.path, t("error.directory_not_found"));
+        } else {
+          pane.setError(deviceResultMessage(res, "error.mount_denied", "error.could_not_mount"));
+          if (res && res.reason === "denied") await offerMountPermission(res.detail ?? "", device);
+        }
+      } catch (e) {
+        pane.setError(deviceErrorMessage(e, "error.mount_denied", "error.could_not_mount"));
+      } finally {
+        mountingDeviceRef.current = null;
+        setMountingDevice(null);
+      }
+    },
+    [refreshDrives],
+  );
+
   const goToDrive = useCallback(
     (drive: DriveEntry) => {
       const pane = panesRef.current[activePaneIndexRef.current];
@@ -2140,55 +2197,78 @@ function FileManagerPage() {
       // only plugged in has no folder to open yet: selecting it mounts the
       // volume first and then goes wherever the system put it.
       if (drive.mounted === false) {
-        const device = drive.device;
-        if (!device || mountingDeviceRef.current) return;
-        mountingDeviceRef.current = device;
-        setMountingDevice(device);
-        void (async () => {
-          try {
-            const res = await mountDrive(device);
-            await refreshDrives();
-            if (res && res.success && res.path) {
-              await pane.loadPath(res.path, t("error.directory_not_found"));
-            } else {
-              pane.setError(deviceResultMessage(res, "error.mount_denied", "error.could_not_mount"));
-              if (res && res.reason === "denied") await offerMountPermission(res.detail ?? "");
-            }
-          } catch (e) {
-            pane.setError(deviceErrorMessage(e, "error.mount_denied", "error.could_not_mount"));
-          } finally {
-            mountingDeviceRef.current = null;
-            setMountingDevice(null);
-          }
-        })();
+        if (drive.device) void mountAndOpen(drive.device);
         return;
       }
 
       void pane.loadPath(drive.path, t("error.directory_not_found"));
     },
-    [refreshDrives],
+    [mountAndOpen],
   );
 
   /**
-   * Ask the backend to write the permission script out, then show what to do
-   * with it. The script is written on demand rather than at install time so
-   * nothing appears in the user's home until it is actually needed.
+   * The mount was refused by the system's own policy. Show what can be done
+   * about it: with Decky's root flag the plugin can grant the permission
+   * itself, and without it there is a script to run in Desktop Mode.
    */
-  const offerMountPermission = useCallback(async (detail: string) => {
-    let info = { success: false, path: "", command: "", detail: "", installed: false };
+  const offerMountPermission = useCallback(async (detail: string, device: string) => {
+    let state = { installed: false, can_install: false, user: "" };
     try {
-      info = await prepareMountPermission();
-    } catch (e) {
-      info = { ...info, detail: e instanceof Error ? e.message : String(e) };
+      state = await getMountPermission();
+    } catch {
+      // An older backend has no such endpoint; the script path still works.
+    }
+    let command = "";
+    let path = "";
+    let error = "";
+    // The script is only written when it is the way forward, so nothing
+    // appears in the user's home on a build that can do this by itself.
+    if (!state.can_install) {
+      try {
+        const info = await prepareMountPermission();
+        command = info.command;
+        path = info.path;
+        error = info.success ? "" : info.detail;
+      } catch (e) {
+        error = e instanceof Error ? e.message : String(e);
+      }
     }
     setMountPermission({
       detail,
-      command: info.command,
-      path: info.path,
-      installed: !!info.installed,
-      error: info.success ? "" : info.detail,
+      device,
+      command,
+      path,
+      installed: !!state.installed,
+      canInstall: !!state.can_install,
+      error,
+      busy: false,
     });
   }, []);
+
+  /**
+   * Grant the permission, then carry on with the drive that was refused.
+   */
+  const enableMounting = useCallback(
+    async (device: string) => {
+      setMountPermission((previous) => (previous ? { ...previous, busy: true, error: "" } : previous));
+      let ok = false;
+      let error = "";
+      try {
+        const res = await installMountPermission();
+        ok = !!res?.success;
+        error = res?.detail ?? "";
+      } catch (e) {
+        error = e instanceof Error ? e.message : String(e);
+      }
+      if (!ok) {
+        setMountPermission((previous) => (previous ? { ...previous, busy: false, error } : previous));
+        return;
+      }
+      setMountPermission(null);
+      if (device) await mountAndOpen(device);
+    },
+    [mountAndOpen],
+  );
 
   /**
    * Unmount a drive so it can be pulled out safely. Any panel still sitting
@@ -2734,6 +2814,20 @@ function FileManagerPage() {
     }
     return undefined;
   }, [mountPermission]);
+
+  // Asked for when the drives screen opens rather than on a timer: it only
+  // changes when this plugin changes it.
+  useEffect(() => {
+    if (!manageDrivesRequested) return;
+    void (async () => {
+      try {
+        const state = await getMountPermission();
+        setMountPermissionState({ installed: !!state.installed, canInstall: !!state.can_install });
+      } catch {
+        setMountPermissionState({ installed: false, canInstall: false });
+      }
+    })();
+  }, [manageDrivesRequested]);
 
   useEffect(() => {
     if (manageDrivesRequested) {
@@ -4197,6 +4291,13 @@ function FileManagerPage() {
                     >
                       {mountPermission.installed ? (
                         <div style={{ fontSize: 13 }}>{t("mount.permission_installed")}</div>
+                      ) : mountPermission.canInstall ? (
+                        // Decky started the plugin as root, so the permission
+                        // is one button away and Desktop Mode is not needed.
+                        <>
+                          <div style={{ fontSize: 13 }}>{t("mount.permission_why")}</div>
+                          <div style={{ fontSize: 13 }}>{t("mount.permission_root_why")}</div>
+                        </>
                       ) : (
                         <>
                           <div style={{ fontSize: 13 }}>{t("mount.permission_why")}</div>
@@ -4235,6 +4336,14 @@ function FileManagerPage() {
                       ) : null}
                     </div>
                     <div style={{ display: "flex", gap: 12, justifyContent: "center", marginTop: 14 }}>
+                      {mountPermission.canInstall && !mountPermission.installed ? (
+                        <DialogButton
+                          disabled={mountPermission.busy}
+                          onClick={() => void enableMounting(mountPermission.device)}
+                        >
+                          {mountPermission.busy ? t("mount.permission_busy") : t("action.enable_mounting")}
+                        </DialogButton>
+                      ) : null}
                       <DialogButton onClick={() => setMountPermission(null)}>{t("action.close")}</DialogButton>
                     </div>
                   </Focusable>
@@ -4279,6 +4388,25 @@ function FileManagerPage() {
                     </div>
                     <div style={{ display: "flex", gap: 12, justifyContent: "center", marginTop: 14 }}>
                       <DialogButton onClick={resetDriveVisibility}>{t("action.reset")}</DialogButton>
+                      {/* Granting the mount permission is offered where it is
+                          needed; taking it back has to live somewhere the
+                          person can find it, and this is the drives screen. */}
+                      {mountPermissionState.installed && mountPermissionState.canInstall ? (
+                        <DialogButton
+                          onClick={() => {
+                            void (async () => {
+                              try {
+                                const res = await removeMountPermission();
+                                setMountPermissionState((previous) => ({ ...previous, installed: !!res?.installed }));
+                              } catch {
+                                // Nothing useful to say here; the row simply stays.
+                              }
+                            })();
+                          }}
+                        >
+                          {t("action.remove_permission")}
+                        </DialogButton>
+                      ) : null}
                       <DialogButton onClick={() => setManageDrivesRequested(false)}>{t("action.close")}</DialogButton>
                     </div>
                   </Focusable>

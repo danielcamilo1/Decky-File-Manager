@@ -3,6 +3,193 @@ import os
 import decky
 import asyncio
 
+# --------------------------------------------------------------------------
+# Privilege handling.
+#
+# The plugin asks Decky for root (`"flags": ["root"]`) because mounting a
+# drive cannot be done without it: udisks2 grants that to an active desktop
+# session, which a Gaming Mode plugin is not, and no arrangement of mount
+# helpers gets around a polkit refusal.
+#
+# It then gives root away immediately and permanently, before a single file
+# operation can run. A file manager that stayed root would create root-owned
+# folders that Steam and games cannot write into, and would let one wrong
+# button press take out the OS. What keeps root is a forked child that
+# understands two words - install the mount rule, or remove it - and nothing
+# else; it takes no arguments, so there is nothing to aim at anything else.
+# --------------------------------------------------------------------------
+
+_POLKIT_RULE_PATH = "/etc/polkit-1/rules.d/50-decky-file-manager.rules"
+
+
+def _polkit_rule_text(user: str) -> str:
+    """The one rule this plugin ever installs: `user` may mount volumes."""
+    return "\n".join([
+        f"// Installed by Decky File Manager for {user}.",
+        "// Lets this user mount and unmount removable volumes through udisks2",
+        "// without a password prompt - the same permission a desktop session",
+        "// already has, extended to Gaming Mode, and to this user alone.",
+        "polkit.addRule(function (action, subject) {",
+        f'    if (subject.user !== "{user}") return polkit.Result.NOT_HANDLED;',
+        '    if (action.id.indexOf("org.freedesktop.udisks2.filesystem-mount") === 0 ||',
+        '        action.id === "org.freedesktop.udisks2.filesystem-unmount-others") {',
+        "        return polkit.Result.YES;",
+        "    }",
+        "    return polkit.Result.NOT_HANDLED;",
+        "});",
+        "",
+    ])
+
+
+def _decky_user() -> tuple:
+    """(name, uid, gid) of the person whose Deck this is.
+
+    USER and HOME describe *this process*, which is root while the flag is
+    set; DECKY_USER is the one that keeps naming the real user. Falling back
+    to whoever owns the plugin's own directory covers a loader that did not
+    set it.
+    """
+    import pwd
+
+    name = os.environ.get("DECKY_USER") or ""
+    if name:
+        try:
+            entry = pwd.getpwnam(name)
+            return (name, entry.pw_uid, entry.pw_gid)
+        except KeyError:
+            pass
+    for probe in (
+        os.environ.get("DECKY_PLUGIN_DIR"),
+        os.environ.get("DECKY_USER_HOME"),
+        os.path.dirname(os.path.abspath(__file__)),
+    ):
+        if not probe:
+            continue
+        try:
+            info = os.stat(probe)
+        except OSError:
+            continue
+        if info.st_uid:
+            try:
+                return (pwd.getpwuid(info.st_uid).pw_name, info.st_uid, info.st_gid)
+            except KeyError:
+                return ("", info.st_uid, info.st_gid)
+    return ("", 0, 0)
+
+
+def _root_helper_main(read_fd: int, write_fd: int, user: str) -> None:
+    """The child that keeps root. Two verbs, no arguments, then it is done.
+
+    It reads a word, writes (or deletes) one known file, and answers. An
+    empty read means the plugin is gone, and so is this.
+    """
+    rule = _polkit_rule_text(user)
+    while True:
+        try:
+            data = os.read(read_fd, 64)
+        except OSError:
+            return
+        if not data:
+            return
+        verb = data.strip()
+        try:
+            if verb == b"install":
+                os.makedirs(os.path.dirname(_POLKIT_RULE_PATH), exist_ok=True)
+                with open(_POLKIT_RULE_PATH, "w", encoding="utf-8") as f:
+                    f.write(rule)
+                os.chmod(_POLKIT_RULE_PATH, 0o644)
+                reply = b"ok\n"
+            elif verb == b"remove":
+                try:
+                    os.remove(_POLKIT_RULE_PATH)
+                except FileNotFoundError:
+                    pass
+                reply = b"ok\n"
+            else:
+                reply = b"error unknown request\n"
+        except OSError as e:
+            reply = ("error " + str(e).replace("\n", " ") + "\n").encode("utf-8")
+        try:
+            os.write(write_fd, reply)
+        except OSError:
+            return
+
+
+def _spawn_root_helper(user: str) -> tuple | None:
+    """Fork the helper while we are still root. Returns (pid, write, read)."""
+    try:
+        to_child_r, to_child_w = os.pipe()
+        to_parent_r, to_parent_w = os.pipe()
+    except OSError:
+        return None
+    try:
+        pid = os.fork()
+    except OSError:
+        for fd in (to_child_r, to_child_w, to_parent_r, to_parent_w):
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        return None
+    if pid == 0:
+        try:
+            os.close(to_child_w)
+            os.close(to_parent_r)
+            _root_helper_main(to_child_r, to_parent_w, user)
+        except BaseException:
+            pass
+        finally:
+            os._exit(0)
+    os.close(to_child_r)
+    os.close(to_parent_w)
+    return (pid, to_child_w, to_parent_r)
+
+
+def _chown_decky_dirs(uid: int, gid: int) -> None:
+    """Hand back the directories Decky made for a root plugin.
+
+    They arrive owned by root, and everything this plugin writes to them
+    happens after the drop - settings, the clipboard, the log.
+    """
+    for key in ("DECKY_PLUGIN_SETTINGS_DIR", "DECKY_PLUGIN_RUNTIME_DIR", "DECKY_PLUGIN_LOG_DIR"):
+        root_dir = os.environ.get(key)
+        if not root_dir or not os.path.isdir(root_dir):
+            continue
+        for current, dirs, files in os.walk(root_dir):
+            for name in [current] + [os.path.join(current, n) for n in dirs + files]:
+                try:
+                    os.chown(name, uid, gid)
+                except OSError:
+                    pass
+
+
+def _prepare_privileges() -> tuple | None:
+    """Fork the helper, give root away, and never take it back."""
+    if os.geteuid() != 0:
+        return None  # Decky started us as the user; nothing to do or undo.
+    name, uid, gid = _decky_user()
+    if not uid:
+        decky.logger.error("Decky File Manager: no unprivileged user to drop to; staying as started")
+        return None
+    helper = _spawn_root_helper(name or "deck")
+    _chown_decky_dirs(uid, gid)
+    try:
+        if name:
+            os.initgroups(name, gid)
+        else:
+            os.setgroups([gid])
+        os.setgid(gid)
+        os.setresuid(uid, uid, uid)  # real, effective and saved: no way back
+    except OSError as e:
+        decky.logger.error(f"Decky File Manager: could not drop privileges ({e}); staying as root")
+        return helper
+    decky.logger.info(f"Decky File Manager: running as {name or uid}, root kept only by the mount helper")
+    return helper
+
+
+_ROOT_HELPER = _prepare_privileges()
+
+
 class Plugin:
     def __init__(self):
         self._clipboard_path: str | None = None
@@ -1606,35 +1793,20 @@ class Plugin:
             return self._mount_failure("no_tools", "", attempts)
         return self._mount_failure("failed", "", attempts)
 
-    _POLKIT_RULE_PATH = "/etc/polkit-1/rules.d/50-decky-file-manager.rules"
+    _POLKIT_RULE_PATH = _POLKIT_RULE_PATH
 
     def _mount_permission_script(self) -> str:
-        """A script that grants this user the right to mount removable volumes.
+        """The same rule as a script, for when the plugin is not running as root.
 
         udisks2 hands `filesystem-mount` to a user with an *active login
         session*; a Decky plugin runs outside one, so polkit answers "not
-        authorized" no matter which helper asks. Nothing this plugin can do
-        from userspace gets around that - the permission has to be granted
-        once, as root, and only the person at the machine can do that.
-
-        So the script is written out for them to read and run rather than
-        anything being attempted behind their back.
+        authorized" no matter which helper asks. With Decky's root flag the
+        plugin installs the rule itself (`install_mount_permission`); without
+        it - an older loader, or a build with the flag taken out - this is the
+        fallback, written out for the person to read and run.
         """
         user = self._current_user()
-        rule = "\n".join([
-            f"// Installed by Decky File Manager for {user}.",
-            "// Lets this user mount and unmount removable volumes through udisks2",
-            "// without a password prompt - the same permission a desktop session",
-            "// already has, extended to Gaming Mode, and to this user alone.",
-            "polkit.addRule(function (action, subject) {",
-            f'    if (subject.user !== "{user}") return polkit.Result.NOT_HANDLED;',
-            '    if (action.id.indexOf("org.freedesktop.udisks2.filesystem-mount") === 0 ||',
-            '        action.id === "org.freedesktop.udisks2.filesystem-unmount-others") {',
-            "        return polkit.Result.YES;",
-            "    }",
-            "    return polkit.Result.NOT_HANDLED;",
-            "});",
-        ])
+        rule = _polkit_rule_text(user).rstrip("\n")
         return "\n".join([
             "#!/bin/sh",
             "# Decky File Manager - allow mounting drives from Gaming Mode.",
@@ -1690,6 +1862,44 @@ class Plugin:
     @classmethod
     def _mount_permission_installed(cls) -> bool:
         return os.path.exists(cls._POLKIT_RULE_PATH)
+
+    @staticmethod
+    def _ask_root_helper(verb: str) -> tuple:
+        """Say one of the two words to the child that kept root."""
+        import select
+
+        if _ROOT_HELPER is None:
+            return (False, "no root helper")
+        _pid, write_fd, read_fd = _ROOT_HELPER
+        try:
+            os.write(write_fd, f"{verb}\n".encode("utf-8"))
+            ready, _writable, _bad = select.select([read_fd], [], [], 20)
+            if not ready:
+                return (False, "timed out")
+            answer = os.read(read_fd, 256).decode("utf-8", errors="replace").strip()
+        except OSError as e:
+            return (False, str(e))
+        if answer == "ok":
+            return (True, "")
+        return (False, answer[6:] if answer.startswith("error ") else answer or "no answer")
+
+    async def get_mount_permission(self) -> dict:
+        """Whether mounting is allowed, and whether this build can allow it."""
+        return {
+            "installed": self._mount_permission_installed(),
+            "can_install": _ROOT_HELPER is not None,
+            "user": self._current_user(),
+        }
+
+    async def install_mount_permission(self) -> dict:
+        """Grant this user the right to mount removable volumes."""
+        ok, error = await asyncio.to_thread(self._ask_root_helper, "install")
+        return {"success": ok, "detail": error, "installed": self._mount_permission_installed()}
+
+    async def remove_mount_permission(self) -> dict:
+        """Take that right away again."""
+        ok, error = await asyncio.to_thread(self._ask_root_helper, "remove")
+        return {"success": ok, "detail": error, "installed": self._mount_permission_installed()}
 
     async def mount_drive(self, device: str) -> dict:
         return await asyncio.to_thread(self._mount_device, device)
