@@ -1333,12 +1333,35 @@ class Plugin:
                 return candidate
         return None
 
+    @staticmethod
+    def _clean_env() -> dict:
+        """The environment a system tool should be run in, not ours.
+
+        Decky Loader ships as a PyInstaller binary, so this process runs with
+        LD_LIBRARY_PATH pointed at the bundle it unpacked into /tmp. Anything
+        spawned from here inherits it and links against Decky's copies of
+        libcrypto and friends instead of the system ones, which is how
+        systemd-mount came back with "version `OPENSSL_3.4.0' not found"
+        rather than an answer about the drive. PyInstaller keeps the real
+        values under the _ORIG names for exactly this purpose.
+        """
+        env = dict(os.environ)
+        for name in ("LD_LIBRARY_PATH", "LD_PRELOAD", "PYTHONHOME", "PYTHONPATH"):
+            original = env.pop(f"{name}_ORIG", None)
+            if original:
+                env[name] = original
+            else:
+                env.pop(name, None)
+        return env
+
     def _run_command(self, command: list) -> tuple:
         """(returncode, stdout, stderr); returncode is None when it never ran."""
         import subprocess
 
         try:
-            proc = subprocess.run(command, capture_output=True, text=True, timeout=self._MOUNT_TIMEOUT)
+            proc = subprocess.run(
+                command, capture_output=True, text=True, timeout=self._MOUNT_TIMEOUT, env=self._clean_env()
+            )
         except FileNotFoundError:
             return (None, "", "")
         except (OSError, subprocess.SubprocessError) as e:
@@ -1582,6 +1605,91 @@ class Plugin:
         if attempts and all(attempt["message"] == "not installed" for attempt in attempts):
             return self._mount_failure("no_tools", "", attempts)
         return self._mount_failure("failed", "", attempts)
+
+    _POLKIT_RULE_PATH = "/etc/polkit-1/rules.d/50-decky-file-manager.rules"
+
+    def _mount_permission_script(self) -> str:
+        """A script that grants this user the right to mount removable volumes.
+
+        udisks2 hands `filesystem-mount` to a user with an *active login
+        session*; a Decky plugin runs outside one, so polkit answers "not
+        authorized" no matter which helper asks. Nothing this plugin can do
+        from userspace gets around that - the permission has to be granted
+        once, as root, and only the person at the machine can do that.
+
+        So the script is written out for them to read and run rather than
+        anything being attempted behind their back.
+        """
+        user = self._current_user()
+        rule = "\n".join([
+            f"// Installed by Decky File Manager for {user}.",
+            "// Lets this user mount and unmount removable volumes through udisks2",
+            "// without a password prompt - the same permission a desktop session",
+            "// already has, extended to Gaming Mode, and to this user alone.",
+            "polkit.addRule(function (action, subject) {",
+            f'    if (subject.user !== "{user}") return polkit.Result.NOT_HANDLED;',
+            '    if (action.id.indexOf("org.freedesktop.udisks2.filesystem-mount") === 0 ||',
+            '        action.id === "org.freedesktop.udisks2.filesystem-unmount-others") {',
+            "        return polkit.Result.YES;",
+            "    }",
+            "    return polkit.Result.NOT_HANDLED;",
+            "});",
+        ])
+        return "\n".join([
+            "#!/bin/sh",
+            "# Decky File Manager - allow mounting drives from Gaming Mode.",
+            "# Run it once, as root:  sudo <this file>",
+            "# It writes one polkit rule and changes nothing else. Delete the rule",
+            f"# to undo it:  sudo rm {self._POLKIT_RULE_PATH}",
+            "set -e",
+            'if [ "$(id -u)" -ne 0 ]; then',
+            '    echo "Run this as root: sudo $0" >&2',
+            "    exit 1",
+            "fi",
+            f'RULE="{self._POLKIT_RULE_PATH}"',
+            'if ! mkdir -p "$(dirname "$RULE")" 2>/dev/null || ! touch "$RULE" 2>/dev/null; then',
+            '    echo "Cannot write to /etc. On SteamOS run: sudo steamos-readonly disable" >&2',
+            "    exit 1",
+            "fi",
+            "cat > \"$RULE\" <<'DECKY_RULE_EOF'",
+            rule,
+            "DECKY_RULE_EOF",
+            'chmod 644 "$RULE"',
+            'echo "Done. Mounting from Gaming Mode should work now."',
+            "",
+        ])
+
+    @staticmethod
+    def _current_user() -> str:
+        try:
+            import pwd
+
+            return pwd.getpwuid(os.getuid()).pw_name
+        except (ImportError, KeyError):
+            return os.environ.get("USER") or os.environ.get("DECKY_USER") or "deck"
+
+    async def prepare_mount_permission(self) -> dict:
+        """Write the permission script out and say where it went."""
+        home = os.environ.get("DECKY_USER_HOME") or os.path.expanduser("~")
+        path = os.path.join(home, "decky-file-manager-enable-mounting.sh")
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(self._mount_permission_script())
+            os.chmod(path, 0o755)
+        except OSError as e:
+            return {"success": False, "path": path, "command": "", "detail": str(e),
+                    "installed": self._mount_permission_installed()}
+        return {
+            "success": True,
+            "path": path,
+            "command": f"sudo {path}",
+            "detail": "",
+            "installed": self._mount_permission_installed(),
+        }
+
+    @classmethod
+    def _mount_permission_installed(cls) -> bool:
+        return os.path.exists(cls._POLKIT_RULE_PATH)
 
     async def mount_drive(self, device: str) -> dict:
         return await asyncio.to_thread(self._mount_device, device)

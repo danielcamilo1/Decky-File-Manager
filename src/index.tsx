@@ -497,6 +497,10 @@ type DeviceResult = {
 };
 
 const mountDrive = callable<[string], DeviceResult>("mount_drive");
+const prepareMountPermission = callable<
+  [],
+  { success: boolean; path: string; command: string; detail: string; installed: boolean }
+>("prepare_mount_permission");
 const unmountDrive = callable<[string], DeviceResult>("unmount_drive");
 
 // How often the drives bar re-reads the block devices, so a stick plugged in
@@ -1799,6 +1803,13 @@ function FileManagerPage() {
   const [driveVisibility, setDriveVisibility] = useState<DriveVisibility>(loadDriveVisibility);
   const [manageDrivesRequested, setManageDrivesRequested] = useState(false);
   const manageDrivesModalRef = useRef<HTMLDivElement | null>(null);
+  // Shown when a mount is refused by the system's own policy rather than by
+  // the drive: that is the one mount failure the person holding the Deck can
+  // actually do something about, so it gets a screen instead of a red line.
+  const [mountPermission, setMountPermission] = useState<
+    { detail: string; command: string; path: string; installed: boolean; error: string } | null
+  >(null);
+  const mountPermissionModalRef = useRef<HTMLDivElement | null>(null);
 
   // What the bar and the Y menu offer. `drives` keeps everything the backend
   // found, because the manage list has to be able to show a hidden volume.
@@ -2141,6 +2152,7 @@ function FileManagerPage() {
               await pane.loadPath(res.path, t("error.directory_not_found"));
             } else {
               pane.setError(deviceResultMessage(res, "error.mount_denied", "error.could_not_mount"));
+              if (res && res.reason === "denied") await offerMountPermission(res.detail ?? "");
             }
           } catch (e) {
             pane.setError(deviceErrorMessage(e, "error.mount_denied", "error.could_not_mount"));
@@ -2156,6 +2168,27 @@ function FileManagerPage() {
     },
     [refreshDrives],
   );
+
+  /**
+   * Ask the backend to write the permission script out, then show what to do
+   * with it. The script is written on demand rather than at install time so
+   * nothing appears in the user's home until it is actually needed.
+   */
+  const offerMountPermission = useCallback(async (detail: string) => {
+    let info = { success: false, path: "", command: "", detail: "", installed: false };
+    try {
+      info = await prepareMountPermission();
+    } catch (e) {
+      info = { ...info, detail: e instanceof Error ? e.message : String(e) };
+    }
+    setMountPermission({
+      detail,
+      command: info.command,
+      path: info.path,
+      installed: !!info.installed,
+      error: info.success ? "" : info.detail,
+    });
+  }, []);
 
   /**
    * Unmount a drive so it can be pulled out safely. Any panel still sitting
@@ -2341,7 +2374,7 @@ function FileManagerPage() {
   const createFileRef = useRef<HTMLDivElement | null>(null);
   const createFileConfirmRef = useRef<HTMLButtonElement | null>(null);
   const fileManagerScopeRef = useRef<HTMLDivElement | null>(null);
-  const hasActiveModal = renameRequested || deleteRequested || propertiesRequested || createFolderRequested || createFileRequested || manageDrivesRequested || !!conflictModal || !!operationModal || !!permissionModal;
+  const hasActiveModal = renameRequested || deleteRequested || propertiesRequested || createFolderRequested || createFileRequested || manageDrivesRequested || !!mountPermission || !!conflictModal || !!operationModal || !!permissionModal;
   hasActiveModalRef.current = hasActiveModal;
 
   // Steam dismisses a modal on the B *press*, through the Focusable's own
@@ -2496,8 +2529,8 @@ function FileManagerPage() {
       }
     }
 
-    return propertiesRequested || renameRequested || deleteRequested || createFolderRequested || createFileRequested || manageDrivesRequested || !!conflictModal || !!operationModal || !!permissionModal;
-  }, [propertiesRequested, renameRequested, deleteRequested, createFolderRequested, createFileRequested, manageDrivesRequested, conflictModal, operationModal, permissionModal]);
+    return propertiesRequested || renameRequested || deleteRequested || createFolderRequested || createFileRequested || manageDrivesRequested || !!mountPermission || !!conflictModal || !!operationModal || !!permissionModal;
+  }, [propertiesRequested, renameRequested, deleteRequested, createFolderRequested, createFileRequested, manageDrivesRequested, mountPermission, conflictModal, operationModal, permissionModal]);
 
   useEffect(() => {
     const input = (window as any).SteamClient?.Input;
@@ -2690,6 +2723,17 @@ function FileManagerPage() {
       }, 50);
     }
   }, [renameRequested]);
+
+  useEffect(() => {
+    if (mountPermission) {
+      const timer = window.setTimeout(() => {
+        const first = mountPermissionModalRef.current?.querySelector<HTMLElement>("[tabindex], button");
+        first?.focus();
+      }, 50);
+      return () => window.clearTimeout(timer);
+    }
+    return undefined;
+  }, [mountPermission]);
 
   useEffect(() => {
     if (manageDrivesRequested) {
@@ -4130,6 +4174,70 @@ function FileManagerPage() {
                       </DialogButton>
                     </div>
                   </div>
+                </ModalFocusScope>
+              </DialogBody>
+            </ModalRoot>
+          )}
+
+          {mountPermission && (
+            <ModalRoot show={true} bHideMainWindowForPopouts={true} onCancel={() => setMountPermission(null)}>
+              <DialogBody>
+                <ModalFocusScope>
+                  <div style={{ textAlign: "center", paddingBottom: 4 }}>
+                    <h1 style={{ margin: 0 }}>{t("modal.mount_permission")}</h1>
+                  </div>
+                  <Focusable
+                    onCancel={() => setMountPermission(null)}
+                    onCancelButton={() => setMountPermission(null)}
+                    style={{ outline: "none" }}
+                  >
+                    <div
+                      ref={mountPermissionModalRef}
+                      style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: "50vh", overflowY: "auto", padding: "2px" }}
+                    >
+                      {mountPermission.installed ? (
+                        <div style={{ fontSize: 13 }}>{t("mount.permission_installed")}</div>
+                      ) : (
+                        <>
+                          <div style={{ fontSize: 13 }}>{t("mount.permission_why")}</div>
+                          <div style={{ fontSize: 13 }}>{t("mount.permission_steps")}</div>
+                          {/* The command is the whole point of this screen, so
+                              it is set apart and left selectable rather than
+                              wrapped into the prose. */}
+                          <div
+                            style={{
+                              fontFamily: "monospace",
+                              fontSize: 15,
+                              background: "rgba(0, 0, 0, 0.35)",
+                              borderRadius: 4,
+                              padding: "10px 12px",
+                              wordBreak: "break-all",
+                              userSelect: "text",
+                            }}
+                          >
+                            {mountPermission.command || `sudo ${mountPermission.path}`}
+                          </div>
+                          <div style={{ fontSize: 12, opacity: 0.75 }}>{t("mount.permission_after")}</div>
+                        </>
+                      )}
+                      {mountPermission.error ? (
+                        <div style={{ fontSize: 12, opacity: 0.8 }}>
+                          {t("mount.permission_error")} {mountPermission.error}
+                        </div>
+                      ) : null}
+                      {mountPermission.detail && !mountPermission.installed ? (
+                        <div style={{ fontSize: 11, opacity: 0.6, wordBreak: "break-word" }}>
+                          {t("mount.details")} {mountPermission.detail}
+                        </div>
+                      ) : null}
+                      {mountPermission.detail && mountPermission.installed ? (
+                        <div style={{ fontSize: 12, opacity: 0.8, wordBreak: "break-word" }}>{mountPermission.detail}</div>
+                      ) : null}
+                    </div>
+                    <div style={{ display: "flex", gap: 12, justifyContent: "center", marginTop: 14 }}>
+                      <DialogButton onClick={() => setMountPermission(null)}>{t("action.close")}</DialogButton>
+                    </div>
+                  </Focusable>
                 </ModalFocusScope>
               </DialogBody>
             </ModalRoot>
