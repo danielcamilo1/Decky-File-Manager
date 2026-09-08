@@ -336,6 +336,14 @@ function UsbIcon() {
   );
 }
 
+function EjectIcon() {
+  return (
+    <BaseIcon>
+      <path fillRule="evenodd" d="M11.36 3.32a.75.75 0 0 1 1.28 0l7.5 9a.75.75 0 0 1-.64 1.18h-15a.75.75 0 0 1-.64-1.18l7.5-9ZM3.75 16.5a.75.75 0 0 0-.75.75v2.25c0 .41.34.75.75.75h16.5a.75.75 0 0 0 .75-.75v-2.25a.75.75 0 0 0-.75-.75H3.75Z" clipRule="evenodd" />
+    </BaseIcon>
+  );
+}
+
 function DriveIcon() {
   return (
     <BaseIcon>
@@ -391,6 +399,11 @@ type DriveEntry = {
   device: string | null;
   total: number | null;
   free: number | null;
+  // A drive that is plugged in but not mounted has no path yet: `total` is
+  // then the size of the volume rather than of a filesystem, and `free` is
+  // unknown until it is mounted.
+  mounted?: boolean;
+  fstype?: string | null;
 };
 
 function isArchiveFile(name: string): boolean {
@@ -461,6 +474,12 @@ function driveLabelFor(drive: DriveEntry): string {
 
 const listDir = callable<[string], { path: string; items: FileEntry[] }>("list_dir");
 const listDrives = callable<[], { drives: DriveEntry[] }>("list_drives");
+const mountDrive = callable<[string], { success: boolean; path: string }>("mount_drive");
+const unmountDrive = callable<[string], { success: boolean; path: string }>("unmount_drive");
+
+// How often the drives bar re-reads the block devices, so a stick plugged in
+// while the browser is open turns up on its own.
+const DRIVE_POLL_MS = 5000;
 /**
  * Visited folders are tracked here rather than over RPC. The frontend already
  * knows every folder it opens, and keeping the list local means it cannot come
@@ -590,6 +609,16 @@ function backendErrorMessage(e: any, fallbackKey: string): string {
   return message;
 }
 
+/**
+ * Mounting failures are their own thing: the useful distinction is between
+ * "the system would not let us" and "it did not work", not the raw text of
+ * whichever mount helper answered.
+ */
+function deviceErrorMessage(e: any, deniedKey: string, failedKey: string): string {
+  const message = String(e?.message ?? "");
+  return message.toLowerCase().includes("permiss") ? t(deniedKey) : t(failedKey);
+}
+
 type PaneIndex = 0 | 1;
 
 type PaneApi = {
@@ -704,8 +733,34 @@ function usePane(index: PaneIndex, initialPath: string): PaneApi {
   };
 }
 
-function DriveChip({ drive, current, onSelect }: { drive: DriveEntry; current: boolean; onSelect: (drive: DriveEntry) => void }) {
+/**
+ * One drive in the bar. An unmounted volume is drawn as a dashed outline
+ * asking to be mounted rather than as a place you can already go, since
+ * selecting it does something — it mounts the drive — before it navigates.
+ */
+function DriveChip({
+  drive,
+  current,
+  busy,
+  onSelect,
+}: {
+  drive: DriveEntry;
+  current: boolean;
+  busy: boolean;
+  onSelect: (drive: DriveEntry) => void;
+}) {
   const activate = useCallback(() => onSelect(drive), [drive, onSelect]);
+  const unmounted = drive.mounted === false;
+
+  const subtitle = unmounted
+    ? busy
+      ? t("drive.mounting")
+      : drive.total !== null
+        ? `${formatBytes(drive.total)} · ${t("drive.press_to_mount")}`
+        : t("drive.press_to_mount")
+    : drive.free !== null
+      ? t("drive.free").replace("{free}", formatBytes(drive.free))
+      : null;
 
   return (
     <Focusable
@@ -720,8 +775,11 @@ function DriveChip({ drive, current, onSelect }: { drive: DriveEntry; current: b
         borderRadius: 4,
         flexShrink: 0,
         cursor: "pointer",
-        border: `1px solid ${current ? "rgba(120,180,255,0.9)" : "rgba(255,255,255,0.12)"}`,
-        background: current ? "rgba(120,180,255,0.16)" : "rgba(255,255,255,0.05)",
+        opacity: unmounted && !busy ? 0.75 : 1,
+        border: unmounted
+          ? "1px dashed rgba(255,255,255,0.35)"
+          : `1px solid ${current ? "rgba(120,180,255,0.9)" : "rgba(255,255,255,0.12)"}`,
+        background: current && !unmounted ? "rgba(120,180,255,0.16)" : "rgba(255,255,255,0.05)",
       }}
     >
       {driveIconFor(drive.kind)}
@@ -729,22 +787,31 @@ function DriveChip({ drive, current, onSelect }: { drive: DriveEntry; current: b
         <span style={{ fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 160 }}>
           {driveLabelFor(drive)}
         </span>
-        {drive.free !== null ? (
-          <span style={{ fontSize: 10, opacity: 0.6, whiteSpace: "nowrap" }}>
-            {t("drive.free").replace("{free}", formatBytes(drive.free))}
-          </span>
+        {subtitle ? (
+          <span style={{ fontSize: 10, opacity: 0.6, whiteSpace: "nowrap" }}>{subtitle}</span>
         ) : null}
       </div>
     </Focusable>
   );
 }
 
-function DrivesBar({ drives, currentPath, onSelect }: { drives: DriveEntry[]; currentPath: string; onSelect: (drive: DriveEntry) => void }) {
+function DrivesBar({
+  drives,
+  currentPath,
+  mountingDevice,
+  onSelect,
+}: {
+  drives: DriveEntry[];
+  currentPath: string;
+  mountingDevice: string | null;
+  onSelect: (drive: DriveEntry) => void;
+}) {
   // Longest mount point that contains the current path wins the highlight, so
   // "/run/media/SD" beats "/" when browsing the card.
   const currentDrivePath = useMemo(() => {
     let best: string | null = null;
     for (const drive of drives) {
+      if (drive.mounted === false) continue;
       const prefix = drive.path === "/" ? "/" : `${drive.path}/`;
       if (currentPath === drive.path || currentPath.startsWith(prefix)) {
         if (best === null || drive.path.length > best.length) best = drive.path;
@@ -763,7 +830,13 @@ function DrivesBar({ drives, currentPath, onSelect }: { drives: DriveEntry[]; cu
         style={{ display: "flex", gap: 8, overflowX: "auto", overflowY: "hidden", padding: "2px 0 4px" }}
       >
         {drives.map((drive) => (
-          <DriveChip key={drive.path} drive={drive} current={drive.path === currentDrivePath} onSelect={onSelect} />
+          <DriveChip
+            key={drive.mounted === false ? `dev:${drive.device}` : drive.path}
+            drive={drive}
+            current={drive.mounted !== false && drive.path === currentDrivePath}
+            busy={drive.device !== null && drive.device === mountingDevice}
+            onSelect={onSelect}
+          />
         ))}
       </Focusable>
     </div>
@@ -1558,6 +1631,8 @@ function FileManagerPage() {
   const activePane = activePaneIndex === 0 ? paneA : paneB;
 
   const [drives, setDrives] = useState<DriveEntry[]>([]);
+  const [mountingDevice, setMountingDevice] = useState<string | null>(null);
+  const mountingDeviceRef = useRef<string | null>(null);
   const [showHidden, setShowHidden] = useState(storedPreferences.current.showHidden);
   const [sortOrder, setSortOrder] = useState(storedPreferences.current.sortOrder);
   const [fileTypeFilter, setFileTypeFilter] = useState(storedPreferences.current.fileTypeFilter);
@@ -1771,10 +1846,14 @@ function FileManagerPage() {
   const refreshDrives = useCallback(async () => {
     try {
       const res = await listDrives();
-      setDrives(res.drives ?? []);
+      const next = res.drives ?? [];
+      // The bar is polled, and most polls find exactly what was already
+      // there; keeping the previous array on an unchanged answer spares the
+      // bar a re-render every few seconds.
+      setDrives((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
     } catch (e) {
       console.warn("drives: could not enumerate", e);
-      setDrives([]);
+      setDrives((prev) => (prev.length ? [] : prev));
     }
   }, []);
 
@@ -1836,11 +1915,84 @@ function FileManagerPage() {
     setDualPane((prev) => !prev);
   }, []);
 
-  const goToDrive = useCallback((drive: DriveEntry) => {
-    const pane = panesRef.current[activePaneIndexRef.current];
-    pane.setError(null);
-    void pane.loadPath(drive.path, t("error.directory_not_found"));
-  }, []);
+  // A drive plugged in while the browser is open is nobody's event to
+  // deliver — /proc/mounts and sysfs only ever answer questions — so the bar
+  // asks again on a timer.
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      void refreshDrives();
+    }, DRIVE_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [refreshDrives]);
+
+  const goToDrive = useCallback(
+    (drive: DriveEntry) => {
+      const pane = panesRef.current[activePaneIndexRef.current];
+      pane.setError(null);
+
+      // Nothing auto-mounts a USB stick in Gaming Mode, so a drive that is
+      // only plugged in has no folder to open yet: selecting it mounts the
+      // volume first and then goes wherever the system put it.
+      if (drive.mounted === false) {
+        const device = drive.device;
+        if (!device || mountingDeviceRef.current) return;
+        mountingDeviceRef.current = device;
+        setMountingDevice(device);
+        void (async () => {
+          try {
+            const res = await mountDrive(device);
+            await refreshDrives();
+            if (res && res.path) {
+              await pane.loadPath(res.path, t("error.directory_not_found"));
+            } else {
+              pane.setError(t("error.could_not_mount"));
+            }
+          } catch (e) {
+            pane.setError(deviceErrorMessage(e, "error.mount_denied", "error.could_not_mount"));
+          } finally {
+            mountingDeviceRef.current = null;
+            setMountingDevice(null);
+          }
+        })();
+        return;
+      }
+
+      void pane.loadPath(drive.path, t("error.directory_not_found"));
+    },
+    [refreshDrives],
+  );
+
+  /**
+   * Unmount a drive so it can be pulled out safely. Any panel still sitting
+   * inside it is sent home first — a panel left pointing at a mount point
+   * that no longer exists can only error.
+   */
+  const ejectDrive = useCallback(
+    (drive: DriveEntry) => {
+      const pane = panesRef.current[activePaneIndexRef.current];
+      pane.setError(null);
+      const target = drive.device || drive.path;
+      if (!target) return;
+
+      void (async () => {
+        try {
+          await unmountDrive(target);
+          const home = drives.find((entry) => entry.kind === "home")?.path ?? "/home/deck";
+          const prefix = drive.path === "/" ? "/" : `${drive.path}/`;
+          for (const other of panesRef.current) {
+            const current = other.pathRef.current;
+            if (current === drive.path || current.startsWith(prefix)) {
+              await other.loadPath(home, undefined, false, null);
+            }
+          }
+          await refreshDrives();
+        } catch (e) {
+          pane.setError(deviceErrorMessage(e, "error.unmount_denied", "error.could_not_unmount"));
+        }
+      })();
+    },
+    [drives, refreshDrives],
+  );
 
   const getGameFolders = callable<[string], { install: string | null; compat: string | null; name: string | null }>("get_game_folders");
 
@@ -2826,6 +2978,20 @@ function FileManagerPage() {
       const currentDir = currentPane.pathRef.current;
       const splitOn = dualPaneRef.current;
 
+      // Ejecting is only offered for the removable volume the panel is
+      // actually inside — the deepest mount point containing it, so a card
+      // beats "/" the same way the drives bar highlight does.
+      const ejectable = drives.reduce<DriveEntry | null>((best, drive) => {
+        if (drive.mounted === false || !drive.path) return best;
+        if (drive.kind !== "usb" && drive.kind !== "sdcard") return best;
+        const prefix = drive.path === "/" ? "/" : `${drive.path}/`;
+        if (currentDir !== drive.path && !currentDir.startsWith(prefix)) return best;
+        return best === null || drive.path.length > best.path.length ? drive : best;
+      }, null);
+      const eject = () => {
+        if (ejectable) ejectDrive(ejectable);
+      };
+
       const anchor =
         (typeof document !== "undefined" && document.activeElement instanceof HTMLElement ? (document.activeElement as EventTarget) : undefined) ??
         (paneContainerRefs.current[currentPane.index] as EventTarget | null) ??
@@ -3076,12 +3242,18 @@ function FileManagerPage() {
             {drives.length ? <MenuSeparator /> : null}
             {drives.map((drive) => {
               const go = () => goToDrive(drive);
+              const label = drive.mounted === false ? t("menu.mount_drive").replace("{name}", driveLabelFor(drive)) : driveLabelFor(drive);
               return (
-                <MenuItem key={drive.path} onClick={go} onSelected={go}>
-                  <span style={{ display: "flex", alignItems: "center", gap: 10 }}>{driveIconFor(drive.kind)}{driveLabelFor(drive)}</span>
+                <MenuItem key={drive.mounted === false ? `dev:${drive.device}` : drive.path} onClick={go} onSelected={go}>
+                  <span style={{ display: "flex", alignItems: "center", gap: 10 }}>{driveIconFor(drive.kind)}{label}</span>
                 </MenuItem>
               );
             })}
+            {ejectable ? (
+              <MenuItem onClick={eject} onSelected={eject}>
+                <span style={{ display: "flex", alignItems: "center", gap: 10 }}><EjectIcon />{t("menu.eject")}</span>
+              </MenuItem>
+            ) : null}
             <MenuSeparator />
             <MenuItem onClick={exitApp} onSelected={exitApp}>
               <span style={{ display: "flex", alignItems: "center", gap: 10 }}><ExitIcon />{t("menu.exit")}</span>
@@ -3097,6 +3269,7 @@ function FileManagerPage() {
       cutPath,
       deletePath,
       drives,
+      ejectDrive,
       extractArchive,
       getDirectorySize,
       getProperties,
@@ -3352,7 +3525,12 @@ function FileManagerPage() {
                 </Focusable>
               </div>
 
-              <DrivesBar drives={drives} currentPath={activePane.path} onSelect={goToDrive} />
+              <DrivesBar
+                drives={drives}
+                currentPath={activePane.path}
+                mountingDevice={mountingDevice}
+                onSelect={goToDrive}
+              />
 
               {error ? (
                 <div
