@@ -884,6 +884,23 @@ class Plugin:
                 continue
         return None
 
+    @staticmethod
+    def _sysfs_bus(device: str) -> str:
+        """Which bus a block device hangs off: usb, mmc, nvme, ata or "".
+
+        The kernel's `removable` flag is not the question it looks like: it
+        means "removable *media*", so a card reader answers 1 while a USB-C
+        SSD or any sizeable USB disk answers 0. Going by that flag alone hides
+        exactly the drives people plug in most. The sysfs device path says how
+        the thing is actually attached, and reading it needs no privileges.
+        """
+        real = os.path.realpath(os.path.join("/sys/class/block", os.path.basename(os.path.realpath(device))))
+        segments = real.split("/")
+        for bus in ("usb", "mmc", "nvme", "ata"):
+            if any(segment.startswith(bus) for segment in segments):
+                return bus
+        return ""
+
     def _disk_usage(self, path: str) -> tuple:
         try:
             stat = os.statvfs(path)
@@ -957,7 +974,8 @@ class Plugin:
             # Bazzite and friends.
             in_media_dir = mount_point.startswith(self._REMOVABLE_MOUNT_ROOTS)
             removable = self._is_removable_device(device)
-            if not (in_media_dir or removable is True):
+            bus = self._sysfs_bus(device)
+            if not (in_media_dir or removable is True or bus == "usb"):
                 continue
 
             real_device = os.path.realpath(device)
@@ -967,9 +985,9 @@ class Plugin:
             seen_devices.add(real_device)
 
             base_device = os.path.basename(real_device)
-            if base_device.startswith("mmcblk"):
+            if base_device.startswith("mmcblk") or bus == "mmc":
                 kind = "sdcard"
-            elif removable is True:
+            elif bus == "usb" or removable is True:
                 kind = "usb"
             else:
                 # Not removable, but mounted as media: a second internal disk.
@@ -1126,26 +1144,38 @@ class Plugin:
                 continue
 
             base = os.path.basename(real)
+            props = self._udev_properties(sys_path)
+            id_bus = (props.get("ID_BUS") or "").lower()
+            bus = id_bus or self._sysfs_bus(device)
             removable = self._is_removable_device(device)
-            is_card = base.startswith("mmcblk")
-            if removable is not True and not is_card:
+            is_card = base.startswith("mmcblk") or bus == "mmc"
+            is_usb = bus == "usb"
+            # Removable media, an SD card, or anything on the USB bus. An idle
+            # internal partition stays out: the plugin has no business
+            # mounting a system volume the OS deliberately left alone.
+            if not (is_usb or is_card or removable is True):
                 continue
 
-            props = self._udev_properties(sys_path)
             usage = props.get("ID_FS_USAGE")
             fstype = props.get("ID_FS_TYPE") or None
             if usage and usage != "filesystem":
                 continue
             if fstype in self._NON_BROWSABLE_FSTYPES:
                 continue
-            if not fstype and not usage:
-                # udev knows nothing about this device: an unformatted disk,
-                # or one whose filesystem it could not identify. Mounting it
-                # would fail, so it is not offered.
+            if not fstype and not usage and not props:
+                # udev has nothing on file for this device at all. For a USB
+                # volume that is worth offering anyway — udisks probes the
+                # device itself, and a drive the user can see is better than a
+                # silent omission. Anything else is skipped.
+                if not is_usb:
+                    continue
+            elif not fstype and not usage:
+                # udev looked and found no filesystem: an unformatted disk, or
+                # one it could not identify. Mounting it would only fail.
                 continue
 
             label = self._unescape_udev(props.get("ID_FS_LABEL_ENC") or props.get("ID_FS_LABEL") or "")
-            kind = "sdcard" if is_card else ("usb" if removable is True else "internal")
+            kind = "sdcard" if is_card else ("usb" if is_usb or removable is True else "internal")
 
             drives.append({
                 "name": label or labels.get(real) or base,

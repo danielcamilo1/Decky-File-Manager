@@ -616,7 +616,13 @@ function backendErrorMessage(e: any, fallbackKey: string): string {
  */
 function deviceErrorMessage(e: any, deniedKey: string, failedKey: string): string {
   const message = String(e?.message ?? "");
-  return message.toLowerCase().includes("permiss") ? t(deniedKey) : t(failedKey);
+  const base = message.toLowerCase().includes("permiss") ? t(deniedKey) : t(failedKey);
+  // The mount helper's own words are the only clue to *why* it refused - an
+  // NTFS volume Windows left dirty, a filesystem this image cannot read - so
+  // they are kept after the sentence instead of being swallowed by it.
+  const separator = message.indexOf(": ");
+  const detail = separator >= 0 ? message.slice(separator + 2).trim() : "";
+  return detail ? `${base} (${detail})` : base;
 }
 
 type PaneIndex = 0 | 1;
