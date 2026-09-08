@@ -443,6 +443,195 @@ function formatBytes(bytes: number): string {
   return `${value.toFixed(value < 10 && i > 0 ? 2 : 0)} ${sizes[i]}`;
 }
 
+/** What the backend reports about the copy it is running right now. */
+type TransferProgress = {
+  active: boolean;
+  counting: boolean;
+  kind: string;
+  name: string;
+  current: string;
+  total_files: number;
+  copied_files: number;
+  total_bytes: number;
+  copied_bytes: number;
+  elapsed: number;
+};
+
+/** The same thing once the modal has derived a speed out of it. */
+type TransferDetail = {
+  counting: boolean;
+  current: string;
+  copiedFiles: number;
+  totalFiles: number;
+  copiedBytes: number;
+  totalBytes: number;
+  speed: number;
+  peak: number;
+  eta: number;
+  samples: number[];
+};
+
+// One sample per poll, so the graph holds the last ~17 seconds.
+const SPEED_SAMPLES = 48;
+const PROGRESS_POLL_MS = 350;
+
+function formatSpeed(bytesPerSecond: number): string {
+  if (!Number.isFinite(bytesPerSecond) || bytesPerSecond <= 0) return "0 B/s";
+  return `${formatBytes(bytesPerSecond)}/s`;
+}
+
+/** "45 s", "2 min 10 s", "1 h 4 min" - short enough for one line on a Deck. */
+function formatDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return "";
+  const whole = Math.round(seconds);
+  if (whole < 60) return `${whole} ${t("unit.second_short")}`;
+  const minutes = Math.floor(whole / 60);
+  if (minutes < 60) {
+    const rest = whole % 60;
+    return rest
+      ? `${minutes} ${t("unit.minute_short")} ${rest} ${t("unit.second_short")}`
+      : `${minutes} ${t("unit.minute_short")}`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `${hours} ${t("unit.hour_short")} ${rest} ${t("unit.minute_short")}` : `${hours} ${t("unit.hour_short")}`;
+}
+
+/**
+ * Copy speed over the last few seconds, as a filled sparkline.
+ *
+ * Samples fill the box from the left at a fixed step rather than being
+ * stretched to whatever has arrived so far: the line then moves at a steady
+ * pace instead of being redrawn at a new scale on every tick. The height is
+ * scaled to the peak of the window, so a stall reads as a dip rather than as
+ * an empty graph.
+ */
+function SpeedGraph({ samples }: { samples: number[] }) {
+  const width = 300;
+  const height = 68;
+  const peak = Math.max(...samples, 1);
+  const step = width / (SPEED_SAMPLES - 1);
+  const points = samples.map((value, index) => {
+    const x = index * step;
+    const y = height - 3 - (value / peak) * (height - 8);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  const line = points.join(" ");
+  const area = points.length > 1 ? `0,${height} ${line} ${((points.length - 1) * step).toFixed(1)},${height}` : "";
+
+  return (
+    <svg
+      viewBox={`0 0 ${width} ${height}`}
+      preserveAspectRatio="none"
+      style={{ width: "100%", height, display: "block", borderRadius: 4, background: "rgba(0,0,0,0.3)" }}
+    >
+      <defs>
+        <linearGradient id="dfm-speed-fill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="rgba(120,180,255,0.5)" />
+          <stop offset="100%" stopColor="rgba(120,180,255,0.03)" />
+        </linearGradient>
+      </defs>
+      {[0.25, 0.5, 0.75].map((fraction) => (
+        <line
+          key={fraction}
+          x1={0}
+          x2={width}
+          y1={height * fraction}
+          y2={height * fraction}
+          stroke="rgba(255,255,255,0.07)"
+          strokeWidth={1}
+          vectorEffect="non-scaling-stroke"
+        />
+      ))}
+      {area ? <polygon points={area} fill="url(#dfm-speed-fill)" /> : null}
+      {points.length > 1 ? (
+        <polyline
+          points={line}
+          fill="none"
+          stroke="rgba(140,195,255,0.95)"
+          strokeWidth={2}
+          strokeLinejoin="round"
+          strokeLinecap="round"
+          // The viewBox is stretched horizontally, which would stretch the
+          // stroke with it.
+          vectorEffect="non-scaling-stroke"
+        />
+      ) : null}
+    </svg>
+  );
+}
+
+/** The body of the progress modal: speed, graph, bar, and what is left. */
+function OperationProgress({ label, progress, transfer }: { label: string; progress: number; transfer?: TransferDetail }) {
+  // Only a tracked copy has anything to count; everything else keeps the
+  // indeterminate bar it has always had.
+  const detail = transfer && (transfer.counting || transfer.totalBytes > 0) ? transfer : null;
+  const filesLeft = detail ? Math.max(detail.totalFiles - detail.copiedFiles, 0) : 0;
+
+  return (
+    <div style={{ minWidth: 320, padding: "8px 0" }}>
+      <div style={{ textAlign: "center", marginBottom: 10 }}>
+        <strong>{label}</strong>
+      </div>
+
+      {detail ? (
+        <>
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 6 }}>
+            <div style={{ fontSize: 22, fontWeight: 600, lineHeight: 1.1 }}>
+              {detail.counting ? t("progress.measuring") : formatSpeed(detail.speed)}
+            </div>
+            {detail.peak > 0 ? (
+              <div style={{ fontSize: 11, opacity: 0.6 }}>
+                {t("progress.peak").replace("{speed}", formatSpeed(detail.peak))}
+              </div>
+            ) : null}
+          </div>
+          <SpeedGraph samples={detail.samples} />
+        </>
+      ) : null}
+
+      <div style={{ height: 12, borderRadius: 999, background: "#2b2b2b", overflow: "hidden", marginTop: detail ? 10 : 0 }}>
+        <div style={{ height: "100%", width: `${progress}%`, background: "#4e8ad9", transition: "width 0.2s linear" }} />
+      </div>
+
+      {detail ? (
+        <>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginTop: 8, fontSize: 12 }}>
+            <span>{`${progress}% · ${formatBytes(detail.copiedBytes)} / ${formatBytes(detail.totalBytes)}`}</span>
+            <span>
+              {filesLeft === 1
+                ? t("progress.file_left")
+                : t("progress.files_left").replace("{count}", String(filesLeft))}
+            </span>
+          </div>
+          {detail.eta > 0 ? (
+            <div style={{ textAlign: "center", marginTop: 4, fontSize: 12, opacity: 0.6 }}>
+              {t("progress.eta").replace("{time}", formatDuration(detail.eta))}
+            </div>
+          ) : null}
+          {detail.current ? (
+            <div
+              style={{
+                marginTop: 6,
+                fontSize: 11,
+                opacity: 0.55,
+                textAlign: "center",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {detail.current}
+            </div>
+          ) : null}
+        </>
+      ) : (
+        <div style={{ textAlign: "center", marginTop: 8, fontSize: 12 }}>{progress}%</div>
+      )}
+    </div>
+  );
+}
+
 function parentDirOf(path: string): string {
   const parts = path.split("/").filter((p) => p !== "");
   parts.pop();
@@ -515,7 +704,14 @@ const installMountPermission = callable<[], { success: boolean; detail: string; 
 const removeMountPermission = callable<[], { success: boolean; detail: string; installed: boolean }>(
   "remove_mount_permission",
 );
-const unmountDrive = callable<[string], DeviceResult>("unmount_drive");
+/**
+ * Ejecting unmounts every partition on the drive and then powers it down, so
+ * it can actually be pulled out. `powered_off` is false when the drive would
+ * not power down, which is not a failure: it has still been flushed.
+ */
+const ejectDriveCall = callable<[string], DeviceResult & { powered_off?: boolean }>("eject_drive");
+const getTransferProgress = callable<[], TransferProgress>("get_transfer_progress");
+const cancelTransfer = callable<[], { ok: boolean }>("cancel_transfer");
 
 // How often the drives bar re-reads the block devices, so a stick plugged in
 // while the browser is open turns up on its own.
@@ -1813,6 +2009,18 @@ function FileManagerPage() {
 
   const [drives, setDrives] = useState<DriveEntry[]>([]);
   const [mountingDevice, setMountingDevice] = useState<string | null>(null);
+  // Ejecting is the one action whose whole point is the confirmation: the
+  // person is about to pull a drive out of the machine.
+  const [notice, setNotice] = useState<string | null>(null);
+  const noticeTimer = useRef<number | null>(null);
+  const showNotice = useCallback((message: string) => {
+    setNotice(message);
+    if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
+    noticeTimer.current = window.setTimeout(() => setNotice(null), 8000);
+  }, []);
+  useEffect(() => () => {
+    if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
+  }, []);
   const mountingDeviceRef = useRef<string | null>(null);
   const [driveVisibility, setDriveVisibility] = useState<DriveVisibility>(loadDriveVisibility);
   const [manageDrivesRequested, setManageDrivesRequested] = useState(false);
@@ -2271,20 +2479,22 @@ function FileManagerPage() {
   );
 
   /**
-   * Unmount a drive so it can be pulled out safely. Any panel still sitting
-   * inside it is sent home first — a panel left pointing at a mount point
-   * that no longer exists can only error.
+   * Eject a drive: unmount everything on it, power it down, and say that it
+   * is safe to pull out. Any panel still sitting inside it is sent home
+   * first — a panel left pointing at a mount point that no longer exists can
+   * only error.
    */
   const ejectDrive = useCallback(
     (drive: DriveEntry) => {
       const pane = panesRef.current[activePaneIndexRef.current];
       pane.setError(null);
+      setNotice(null);
       const target = drive.device || drive.path;
       if (!target) return;
 
       void (async () => {
         try {
-          const res = await unmountDrive(target);
+          const res = await ejectDriveCall(target);
           if (res && !res.success) {
             pane.setError(deviceResultMessage(res, "error.unmount_denied", "error.could_not_unmount"));
             return;
@@ -2298,12 +2508,15 @@ function FileManagerPage() {
             }
           }
           await refreshDrives();
+          // A drive that would not power down has still been flushed and
+          // unmounted, so the answer to "can I pull it out" is the same.
+          showNotice(t("drive.safe_to_remove").replace("{name}", driveLabelFor(drive)));
         } catch (e) {
           pane.setError(deviceErrorMessage(e, "error.unmount_denied", "error.could_not_unmount"));
         }
       })();
     },
-    [drives, refreshDrives],
+    [drives, refreshDrives, showNotice],
   );
 
   const getGameFolders = callable<[string], { install: string | null; compat: string | null; name: string | null }>("get_game_folders");
@@ -2402,6 +2615,7 @@ function FileManagerPage() {
   type OperationModalState = {
     label: string;
     progress: number;
+    transfer?: TransferDetail;
   } | null;
   type PermissionModalState = {
     message: string;
@@ -2410,6 +2624,16 @@ function FileManagerPage() {
   const [conflictModal, setConflictModal] = useState<ConflictModalState>(null);
   const [operationModal, setOperationModal] = useState<OperationModalState>(null);
   const [operationCancelRequested, setOperationCancelRequested] = useState(false);
+  // The running operation captured whatever the state was when it started, so
+  // the decision has to be readable from somewhere that does not go stale.
+  const operationCancelRef = useRef(false);
+  const requestOperationCancel = useCallback(() => {
+    operationCancelRef.current = true;
+    setOperationCancelRequested(true);
+    void cancelTransfer().catch(() => {
+      // Not every operation is a copy; the ones that are not simply run on.
+    });
+  }, []);
   const [permissionModal, setPermissionModal] = useState<PermissionModalState>(null);
   const conflictPrimaryRef = useRef<HTMLButtonElement | null>(null);
   const permissionPrimaryRef = useRef<HTMLButtonElement | null>(null);
@@ -2911,23 +3135,105 @@ function FileManagerPage() {
   const isOperationRunning = useRef(false);
 
   const runOperation = useCallback(
-    async (label: string, action: () => Promise<any>, options?: { onError?: (e: any) => void; onSuccess?: (res: any) => void }) => {
+    async (
+      label: string,
+      action: () => Promise<any>,
+      options?: { onError?: (e: any) => void; onSuccess?: (res: any) => void; tracked?: boolean },
+    ) => {
       if (isOperationRunning.current) {
         setError(t("action.another_running"));
         return null;
       }
       isOperationRunning.current = true;
 
+      operationCancelRef.current = false;
       setOperationCancelRequested(false);
       setOperationModal({ label, progress: 0 });
-      const interval = window.setInterval(() => {
-        setOperationModal((prev) => prev ? { ...prev, progress: Math.min(prev.progress + 7, 95) } : prev);
-      }, 160);
+      // The placeholder bar, for an operation with nothing to count. A copy
+      // never starts it: it would climb while the source is still being
+      // measured and then have to jump backwards to the real figure.
+      let interval = options?.tracked
+        ? 0
+        : window.setInterval(() => {
+            setOperationModal((prev) => prev ? { ...prev, progress: Math.min(prev.progress + 7, 95) } : prev);
+          }, 160);
+      const stopTicker = () => {
+        if (!interval) return;
+        window.clearInterval(interval);
+        interval = 0;
+      };
+
+      // A copy reports how far it has got; speed is the difference between
+      // two polls, which is also what makes the graph a graph.
+      let poll = 0;
+      let finished = false;
+      if (options?.tracked) {
+        let lastBytes = 0;
+        let lastAt = Date.now();
+        let smoothed = 0;
+        let peak = 0;
+        let samples: number[] = [];
+        let busy = false;
+        poll = window.setInterval(() => {
+          if (busy) return;
+          busy = true;
+          void (async () => {
+            try {
+              const snapshot = await getTransferProgress();
+              const now = Date.now();
+              const seconds = Math.max((now - lastAt) / 1000, 0.001);
+              const moved = Math.max(snapshot.copied_bytes - lastBytes, 0);
+              lastBytes = snapshot.copied_bytes;
+              lastAt = now;
+
+              if (!snapshot.counting && snapshot.active) {
+                const sample = moved / seconds;
+                samples = [...samples, sample].slice(-SPEED_SAMPLES);
+                // The figure on screen is smoothed so it can be read; the
+                // graph keeps the raw samples, which is where a stall shows.
+                smoothed = smoothed > 0 ? smoothed * 0.6 + sample * 0.4 : sample;
+                peak = Math.max(peak, sample);
+              }
+
+              if (finished) return;
+              const left = Math.max(snapshot.total_bytes - snapshot.copied_bytes, 0);
+              setOperationModal((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      progress:
+                        snapshot.total_bytes > 0
+                          ? Math.min(Math.round((snapshot.copied_bytes / snapshot.total_bytes) * 100), 99)
+                          : prev.progress,
+                      transfer: {
+                        counting: snapshot.counting,
+                        current: snapshot.current,
+                        copiedFiles: snapshot.copied_files,
+                        totalFiles: snapshot.total_files,
+                        copiedBytes: snapshot.copied_bytes,
+                        totalBytes: snapshot.total_bytes,
+                        speed: smoothed,
+                        peak,
+                        eta: smoothed > 0 ? left / smoothed : 0,
+                        samples,
+                      },
+                    }
+                  : prev,
+              );
+            } catch {
+              // A poll that fails says nothing about the copy itself, and the
+              // next one is 350ms away.
+            } finally {
+              busy = false;
+            }
+          })();
+        }, PROGRESS_POLL_MS);
+      }
 
       try {
         const res = await action();
 
-        if (operationCancelRequested) {
+        if (operationCancelRef.current || (res && typeof res === "object" && (res as any).cancelled)) {
           setOperationModal(null);
           setError(t("action.cancelled"));
           await refreshClipboard();
@@ -2939,7 +3245,20 @@ function FileManagerPage() {
           throw new Error(err);
         }
 
-        setOperationModal((prev) => prev ? { ...prev, progress: 100 } : prev);
+        finished = true;
+        stopTicker();
+        if (poll) window.clearInterval(poll);
+        setOperationModal((prev) =>
+          prev
+            ? {
+                ...prev,
+                progress: 100,
+                transfer: prev.transfer
+                  ? { ...prev.transfer, copiedFiles: prev.transfer.totalFiles, copiedBytes: prev.transfer.totalBytes, eta: 0 }
+                  : undefined,
+              }
+            : prev,
+        );
 
         await refreshClipboard();
         await refreshPanes();
@@ -2954,6 +3273,7 @@ function FileManagerPage() {
         window.setTimeout(() => setOperationModal(null), 220);
         return res;
       } catch (e: any) {
+        finished = true;
         setOperationModal(null);
         await refreshClipboard();
 
@@ -2964,12 +3284,13 @@ function FileManagerPage() {
         }
         return null;
       } finally {
-        window.clearInterval(interval);
+        stopTicker();
+        if (poll) window.clearInterval(poll);
         setOperationCancelRequested(false);
         isOperationRunning.current = false;
       }
     },
-    [operationCancelRequested, refreshClipboard, refreshPanes, refreshDrives, setError],
+    [refreshClipboard, refreshPanes, refreshDrives, setError],
   );
 
   const handleOperationError = useCallback((e: any, fallbackKey: string) => {
@@ -3003,6 +3324,7 @@ function FileManagerPage() {
       }
 
       await runOperation(t("action.pasting"), () => pastePathWithOptions(targetDir, "keep-both", false), {
+        tracked: true,
         onError: (e) => handleOperationError(e, "action.failed"),
       });
     } catch (e: any) {
@@ -3038,6 +3360,7 @@ function FileManagerPage() {
       }
 
       await runOperation(label, () => transferPath(item.path, targetDir, mode, "keep-both"), {
+        tracked: true,
         onError: (e) => handleOperationError(e, "action.failed"),
         onSuccess: (res) => {
           if (res?.new_path) destination.setFocusPath(res.new_path as string);
@@ -3304,6 +3627,7 @@ function FileManagerPage() {
       const destination = panesRef.current.find((pane) => pane.pathRef.current === pending.targetDir) ?? null;
       const label = pending.transfer.mode === "copy" ? t("action.copying") : t("action.moving");
       await runOperation(label, () => transferPath(pending.transfer!.srcPath, pending.targetDir, pending.transfer!.mode, strategy), {
+        tracked: true,
         onError: (e) => handleOperationError(e, "action.failed"),
         onSuccess: (res) => {
           if (res?.new_path && destination) destination.setFocusPath(res.new_path as string);
@@ -3313,6 +3637,7 @@ function FileManagerPage() {
     }
 
     await runOperation(t("action.pasting"), () => pastePathWithOptions(pending.targetDir, strategy, applyToAll), {
+      tracked: true,
       onError: (e) => handleOperationError(e, "action.failed"),
     });
   }, [conflictModal, runOperation, transferPath, handleOperationError]);
@@ -3328,19 +3653,12 @@ function FileManagerPage() {
       const currentDir = currentPane.pathRef.current;
       const splitOn = dualPaneRef.current;
 
-      // Ejecting is only offered for the removable volume the panel is
-      // actually inside — the deepest mount point containing it, so a card
-      // beats "/" the same way the drives bar highlight does.
-      const ejectable = drives.reduce<DriveEntry | null>((best, drive) => {
-        if (drive.mounted === false || !drive.path) return best;
-        if (drive.kind !== "usb" && drive.kind !== "sdcard") return best;
-        const prefix = drive.path === "/" ? "/" : `${drive.path}/`;
-        if (currentDir !== drive.path && !currentDir.startsWith(prefix)) return best;
-        return best === null || drive.path.length > best.path.length ? drive : best;
-      }, null);
-      const eject = () => {
-        if (ejectable) ejectDrive(ejectable);
-      };
+      // Every removable volume that is mounted can be ejected, not only the
+      // one the panel happens to be inside: a stick you are done with is
+      // usually not the folder you are looking at.
+      const ejectable = drives.filter(
+        (drive) => drive.mounted !== false && !!drive.path && (drive.kind === "usb" || drive.kind === "sdcard"),
+      );
 
       const anchor =
         (typeof document !== "undefined" && document.activeElement instanceof HTMLElement ? (document.activeElement as EventTarget) : undefined) ??
@@ -3602,11 +3920,20 @@ function FileManagerPage() {
                 </MenuItem>
               );
             })}
-            {ejectable ? (
-              <MenuItem onClick={eject} onSelected={eject}>
-                <span style={{ display: "flex", alignItems: "center", gap: 10 }}><EjectIcon />{t("menu.eject")}</span>
-              </MenuItem>
-            ) : null}
+            {ejectable.map((drive) => {
+              const eject = () => ejectDrive(drive);
+              // With one drive there is nothing to disambiguate, and the
+              // entry reads the way it always has.
+              const label =
+                ejectable.length > 1
+                  ? t("menu.eject_named").replace("{name}", driveLabelFor(drive))
+                  : t("menu.eject");
+              return (
+                <MenuItem key={`eject:${drive.id || drive.path}`} onClick={eject} onSelected={eject}>
+                  <span style={{ display: "flex", alignItems: "center", gap: 10 }}><EjectIcon />{label}</span>
+                </MenuItem>
+              );
+            })}
             <MenuSeparator />
             <MenuItem onClick={exitApp} onSelected={exitApp}>
               <span style={{ display: "flex", alignItems: "center", gap: 10 }}><ExitIcon />{t("menu.exit")}</span>
@@ -3885,6 +4212,21 @@ function FileManagerPage() {
                 mountingDevice={mountingDevice}
                 onSelect={goToDrive}
               />
+
+              {notice ? (
+                <div
+                  style={{
+                    margin: "0 0 8px",
+                    padding: "6px 10px",
+                    borderRadius: 4,
+                    fontSize: 12,
+                    background: "rgba(90,190,120,0.15)",
+                    border: "1px solid rgba(90,190,120,0.4)",
+                  }}
+                >
+                  {notice}
+                </div>
+              ) : null}
 
               {error ? (
                 <div
@@ -4250,21 +4592,19 @@ function FileManagerPage() {
               show={true}
               bDisableBackgroundDismiss={true}
               bHideMainWindowForPopouts={true}
-              onCancel={() => setOperationCancelRequested(true)}
+              onCancel={requestOperationCancel}
             >
               <DialogBody>
                 <ModalFocusScope>
-                  <div style={{ minWidth: 280, padding: "8px 0" }}>
-                    <div style={{ textAlign: "center", marginBottom: 8 }}>
-                      <strong>{operationModal.label}</strong>
-                    </div>
-                    <div style={{ height: 12, borderRadius: 999, background: "#2b2b2b", overflow: "hidden" }}>
-                      <div style={{ height: "100%", width: `${operationModal.progress}%`, background: "#4e8ad9", transition: "width 0.2s linear" }} />
-                    </div>
-                    <div style={{ textAlign: "center", marginTop: 8, fontSize: 12 }}>{operationModal.progress}%</div>
+                  <div>
+                    <OperationProgress
+                      label={operationModal.label}
+                      progress={operationModal.progress}
+                      transfer={operationModal.transfer}
+                    />
                     <div style={{ display: "flex", justifyContent: "center", marginTop: 16 }}>
-                      <DialogButton onClick={() => setOperationCancelRequested(true)}>
-                        {t("action.cancel")}
+                      <DialogButton onClick={requestOperationCancel} disabled={operationCancelRequested}>
+                        {operationCancelRequested ? t("action.cancelling") : t("action.cancel")}
                       </DialogButton>
                     </div>
                   </div>

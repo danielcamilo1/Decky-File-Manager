@@ -1,4 +1,6 @@
 import os
+import threading
+import time
 
 import decky
 import asyncio
@@ -26,13 +28,16 @@ def _polkit_rule_text(user: str) -> str:
     """The one rule this plugin ever installs: `user` may mount volumes."""
     return "\n".join([
         f"// Installed by Decky File Manager for {user}.",
-        "// Lets this user mount and unmount removable volumes through udisks2",
-        "// without a password prompt - the same permission a desktop session",
-        "// already has, extended to Gaming Mode, and to this user alone.",
+        "// Lets this user mount, unmount and safely remove removable volumes",
+        "// through udisks2 without a password prompt - the same permission a",
+        "// desktop session already has, extended to Gaming Mode, and to this",
+        "// user alone.",
         "polkit.addRule(function (action, subject) {",
         f'    if (subject.user !== "{user}") return polkit.Result.NOT_HANDLED;',
         '    if (action.id.indexOf("org.freedesktop.udisks2.filesystem-mount") === 0 ||',
-        '        action.id === "org.freedesktop.udisks2.filesystem-unmount-others") {',
+        '        action.id === "org.freedesktop.udisks2.filesystem-unmount-others" ||',
+        '        action.id === "org.freedesktop.udisks2.eject-media" ||',
+        '        action.id === "org.freedesktop.udisks2.power-off-drive") {',
         "        return polkit.Result.YES;",
         "    }",
         "    return polkit.Result.NOT_HANDLED;",
@@ -190,6 +195,10 @@ def _prepare_privileges() -> tuple | None:
 _ROOT_HELPER = _prepare_privileges()
 
 
+class _CopyCancelled(Exception):
+    """Raised inside the copy thread when the user presses Cancel."""
+
+
 class Plugin:
     def __init__(self):
         self._clipboard_path: str | None = None
@@ -201,6 +210,12 @@ class Plugin:
         self._runtime_file = os.path.join(decky.DECKY_PLUGIN_RUNTIME_DIR, "runtime.json")
         self._load_settings()
         self._load_runtime_state()
+        # Written by the copy thread, read by the event loop; see the copy
+        # progress section below.
+        self._progress_lock = threading.Lock()
+        self._progress: dict = self._blank_progress()
+        self._progress_started = 0.0
+        self._cancel = threading.Event()
 
     def _ensure_runtime_dir(self) -> None:
         os.makedirs(decky.DECKY_PLUGIN_RUNTIME_DIR, exist_ok=True)
@@ -333,25 +348,220 @@ class Plugin:
         self._clipboard_kind = kind
         self._save_runtime_state()
 
-    def _copy_path(self, src_path: str, dst_path: str) -> None:
+    # ------------------------------------------------------------------
+    # Copy progress
+    #
+    # The copy runs in a worker thread (asyncio.to_thread) and writes its
+    # counters here while get_transfer_progress reads them from the event
+    # loop, so both sides take _progress_lock. Copying goes chunk by chunk
+    # instead of through shutil.copytree because a call that only returns
+    # once it has finished has nothing to say on the way.
+    # ------------------------------------------------------------------
+
+    _COPY_CHUNK = 4 * 1024 * 1024
+
+    @staticmethod
+    def _blank_progress() -> dict:
+        return {
+            "active": False,
+            "counting": False,
+            "kind": "",
+            "name": "",
+            "current": "",
+            "total_files": 0,
+            "copied_files": 0,
+            "total_bytes": 0,
+            "copied_bytes": 0,
+            "elapsed": 0.0,
+        }
+
+    def _progress_begin(self, kind: str, name: str, measured: bool) -> None:
+        with self._progress_lock:
+            self._progress = self._blank_progress()
+            self._progress.update({
+                "active": True,
+                "counting": measured,
+                "kind": kind,
+                "name": name,
+                "current": name,
+            })
+            self._progress_started = time.monotonic()
+
+    def _progress_totals(self, files: int, size: int) -> None:
+        with self._progress_lock:
+            self._progress["counting"] = False
+            self._progress["total_files"] = files
+            self._progress["total_bytes"] = size
+
+    def _progress_current(self, name: str) -> None:
+        with self._progress_lock:
+            self._progress["current"] = name
+
+    def _progress_bytes(self, amount: int) -> None:
+        with self._progress_lock:
+            self._progress["copied_bytes"] += amount
+
+    def _progress_file_done(self) -> None:
+        with self._progress_lock:
+            self._progress["copied_files"] += 1
+
+    def _progress_end(self) -> None:
+        with self._progress_lock:
+            self._progress["active"] = False
+            self._progress["counting"] = False
+            self._progress["current"] = ""
+
+    def _measure_source(self, path: str) -> tuple:
+        """How many files and bytes the copy is about to move.
+
+        Best effort on purpose: this only feeds the progress bar, so an entry
+        that cannot be stat'd counts as nothing rather than failing an
+        operation that has not started yet. Directories are visited once by
+        real path, which is what stops a symlink loop walking forever.
+        """
+        files = 0
+        size = 0
+        seen: set = set()
+        stack = [path]
+        while stack:
+            current = stack.pop()
+            try:
+                if os.path.isdir(current):
+                    real = os.path.realpath(current)
+                    if real in seen:
+                        continue
+                    seen.add(real)
+                    with os.scandir(current) as entries:
+                        for entry in entries:
+                            stack.append(entry.path)
+                else:
+                    files += 1
+                    size += os.path.getsize(current)
+            except OSError:
+                continue
+        return (files, size)
+
+    def _copy_file_tracked(self, src_path: str, dst_path: str) -> None:
+        import shutil
+
+        self._progress_current(os.path.basename(src_path))
+        try:
+            with open(src_path, "rb") as source, open(dst_path, "wb") as target:
+                while True:
+                    if self._cancel.is_set():
+                        raise _CopyCancelled()
+                    chunk = source.read(self._COPY_CHUNK)
+                    if not chunk:
+                        break
+                    target.write(chunk)
+                    self._progress_bytes(len(chunk))
+        except _CopyCancelled:
+            # The half-written file is the one thing worth cleaning up: it is
+            # not a copy of anything. Whatever finished before it is left
+            # alone, which is what a cancelled copy looks like everywhere.
+            try:
+                os.remove(dst_path)
+            except OSError:
+                pass
+            raise
+        shutil.copystat(src_path, dst_path)
+        self._progress_file_done()
+
+    def _copy_tree_tracked(self, src_path: str, dst_path: str, dirs_exist_ok: bool = False, seen: set | None = None) -> None:
+        import shutil
+
+        seen = set() if seen is None else seen
+        real = os.path.realpath(src_path)
+        if real in seen:
+            return
+        seen.add(real)
+
+        os.makedirs(dst_path, exist_ok=dirs_exist_ok)
+        with os.scandir(src_path) as entries:
+            children = sorted(entries, key=lambda entry: entry.name)
+        for entry in children:
+            if self._cancel.is_set():
+                raise _CopyCancelled()
+            # Symlinks are followed, which is what shutil.copytree does by
+            # default and therefore what this used to do.
+            if entry.is_dir():
+                self._copy_tree_tracked(entry.path, os.path.join(dst_path, entry.name), True, seen)
+            else:
+                self._copy_file_tracked(entry.path, os.path.join(dst_path, entry.name))
+        shutil.copystat(src_path, dst_path)
+
+    def _copy_path(self, src_path: str, dst_path: str, dirs_exist_ok: bool = False) -> None:
         if os.path.isdir(src_path):
-            import shutil
-
-            shutil.copytree(src_path, dst_path, dirs_exist_ok=False)
+            self._copy_tree_tracked(src_path, dst_path, dirs_exist_ok)
         else:
-            import shutil
+            self._copy_file_tracked(src_path, dst_path)
 
-            shutil.copy2(src_path, dst_path)
+    def _discard_partial(self, path: str) -> None:
+        """Throw away a copy that never finished.
+
+        Only ever called on a path this plugin picked for itself, never on
+        anything that was already there.
+        """
+        try:
+            self._remove_path(path)
+        except OSError:
+            pass
+
+    def _same_filesystem(self, src_path: str, dst_path: str) -> bool:
+        """Whether a move between these two is a rename rather than a copy."""
+        try:
+            return os.stat(src_path).st_dev == os.stat(os.path.dirname(dst_path) or "/").st_dev
+        except OSError:
+            return False
+
+    async def _run_tracked(self, kind: str, source: str, work, measure: bool = True) -> bool:
+        """Run a copy in a worker thread with its counters live; True if cancelled.
+
+        The event loop stays free while it runs, which is the entire point:
+        get_transfer_progress has to be able to answer mid-copy.
+        """
+        self._cancel.clear()
+        self._progress_begin(kind, os.path.basename(source), measure)
+
+        def job() -> None:
+            if measure:
+                files, size = self._measure_source(source)
+                self._progress_totals(files, size)
+            work()
+
+        try:
+            await asyncio.to_thread(job)
+        except _CopyCancelled:
+            return True
+        finally:
+            self._cancel.clear()
+            self._progress_end()
+        return False
+
+    async def cancel_transfer(self) -> dict:
+        """Stop the running copy at the next chunk."""
+        self._cancel.set()
+        return {"ok": True}
+
+    async def get_transfer_progress(self) -> dict:
+        """Where the running copy has got to; polled by the progress modal."""
+        with self._progress_lock:
+            snapshot = dict(self._progress)
+            started = self._progress_started
+        snapshot["elapsed"] = max(0.0, time.monotonic() - started) if started else 0.0
+        return snapshot
 
     def _move_path(self, src_path: str, dst_path: str) -> None:
         try:
             os.rename(src_path, dst_path)
         except OSError as e:
             import errno
-            import shutil
 
             if getattr(e, 'errno', None) == errno.EXDEV:
-                shutil.move(src_path, dst_path)
+                # Across filesystems a move is a copy and a delete; going
+                # through the tracked copy keeps the progress modal fed.
+                self._copy_path(src_path, dst_path)
+                self._remove_path(src_path)
             else:
                 raise
 
@@ -582,6 +792,8 @@ class Plugin:
             raise ValueError("Não é possível colar dentro do diretório.")
 
         raw_dst = os.path.join(target_dir, name)
+        # Set when the finished copy has to take an existing item's place.
+        replacing = ""
 
         if os.path.exists(raw_dst):
             if conflict_strategy == "ignore":
@@ -594,8 +806,11 @@ class Plugin:
                 self._save_runtime_state()
                 return {"ok": True, "conflict_strategy": conflict_strategy}
             if conflict_strategy == "replace":
-                self._remove_path(raw_dst)
-                dst = raw_dst
+                # The copy lands beside the old item and takes its place at
+                # the end. Deleting first would mean a cancelled or failed
+                # copy left the person with neither.
+                dst = self._unique_target_path(raw_dst)
+                replacing = raw_dst
             elif conflict_strategy == "keep-both":
                 dst = self._unique_target_path(raw_dst)
             elif conflict_strategy == "merge":
@@ -605,25 +820,42 @@ class Plugin:
         else:
             dst = raw_dst
 
-        try:
-            if conflict_strategy == "merge" and os.path.isdir(src) and os.path.isdir(dst):
-                import shutil
+        if kind not in ("copy", "cut"):
+            raise ValueError("Clipboard inválida")
 
-                if kind == "copy":
-                    shutil.copytree(src, dst, dirs_exist_ok=True)
-                elif kind == "cut":
-                    shutil.copytree(src, dst, dirs_exist_ok=True)
-                    shutil.rmtree(src)
+        merging = conflict_strategy == "merge" and os.path.isdir(src) and os.path.isdir(dst)
+
+        def work() -> None:
+            try:
+                if merging:
+                    self._copy_path(src, dst, dirs_exist_ok=True)
+                    if kind == "cut":
+                        self._remove_path(src)
+                elif kind == "copy":
+                    self._copy_path(src, dst)
                 else:
-                    raise ValueError("Clipboard inválida")
-            elif kind == "copy":
-                self._copy_path(src, dst)
-            elif kind == "cut":
-                self._move_path(src, dst)
-            else:
-                raise ValueError("Clipboard inválida")
+                    self._move_path(src, dst)
+            except BaseException:
+                if replacing:
+                    self._discard_partial(dst)
+                raise
+            if replacing:
+                self._remove_path(replacing)
+                os.replace(dst, replacing)
+
+        # A move inside one filesystem is a rename: instant, with nothing to
+        # measure and nothing worth watching.
+        instant = kind == "cut" and not merging and self._same_filesystem(src, dst)
+
+        try:
+            cancelled = await self._run_tracked("copy" if kind == "copy" else "move", src, work, not instant)
         except PermissionError as e:
             raise PermissionError(f"Sem permissão: {e}") from e
+
+        # A cancelled paste has not happened, so the clipboard keeps what it
+        # was holding and the person can try again somewhere else.
+        if cancelled:
+            return {"ok": True, "cancelled": True}
 
         self._clipboard_path = None
         self._clipboard_kind = None
@@ -1719,19 +1951,30 @@ class Plugin:
         return {"success": True, "path": path, "reason": "ok", "detail": "", "attempts": attempts}
 
     @staticmethod
-    def _mount_failure(reason: str, note: str, attempts: list) -> dict:
-        """A failure with every helper's own words attached.
+    def _attempt_detail(attempts: list) -> str:
+        """Every helper's own words, each distinct sentence said once.
 
         The same helper often refuses the same way several times over (the
-        NTFS retries), so each distinct sentence is said once.
+        NTFS retries), and three of those is already more than a modal can
+        show.
         """
         unique: list = []
         for attempt in attempts:
             entry = f"{attempt['tool']}: {attempt['message']}"
             if attempt["message"] and entry not in unique:
                 unique.append(entry)
-        detail = "; ".join(unique[:3]) or note
-        return {"success": False, "path": "", "reason": reason, "detail": detail, "attempts": attempts}
+        return "; ".join(unique[:3])
+
+    @classmethod
+    def _mount_failure(cls, reason: str, note: str, attempts: list) -> dict:
+        """A failure with every helper's own words attached."""
+        return {
+            "success": False,
+            "path": "",
+            "reason": reason,
+            "detail": cls._attempt_detail(attempts) or note,
+            "attempts": attempts,
+        }
 
     @staticmethod
     def _discard_target_dir(target: str) -> None:
@@ -1792,6 +2035,74 @@ class Plugin:
         if attempts and all(attempt["message"] == "not installed" for attempt in attempts):
             return self._mount_failure("no_tools", "", attempts)
         return self._mount_failure("failed", "", attempts)
+
+    def _mounted_partitions(self, disk: str) -> list:
+        """Every mounted partition of one physical disk.
+
+        Cutting power to a drive that still has a partition mounted throws
+        away whatever the kernel had not written out yet, so a safe eject has
+        to let go of all of them, not only the one the user was looking at.
+        """
+        return [
+            device
+            for device in self._mount_points()
+            if disk and self._parent_disk(device) == disk
+        ]
+
+    def _power_off_disk(self, disk: str, attempts: list) -> bool:
+        """Ask udisks to cut power to the drive, so it can be pulled out."""
+        binary = self._resolve_binary("udisksctl")
+        if binary is None:
+            attempts.append({"tool": "udisksctl", "message": "not installed"})
+            return False
+        code, out, err = self._run_command(
+            [binary, "power-off", "--no-user-interaction", "-b", f"/dev/{disk}"]
+        )
+        if code == 0:
+            return True
+        answer = err or out or (f"exit {code}" if code is not None else "did not run")
+        attempts.append({"tool": "power-off", "message": self._summarize_output(answer)})
+        return False
+
+    def _eject_target(self, target: str) -> dict:
+        """Unmount everything on the drive `target` sits on, then power it off.
+
+        The unmount is what makes the drive safe to unplug; the power-off is
+        what makes the system stop listing it, and is deliberately best
+        effort - a drive that will not power down has still been flushed and
+        unmounted. So `success` follows the unmount, and `powered_off` says
+        whether the drive actually went quiet.
+        """
+        device = target if target.startswith("/dev/") else ""
+        if not device:
+            real_target = os.path.realpath(target)
+            for candidate, point in self._mount_points().items():
+                if os.path.realpath(point) == real_target:
+                    device = candidate
+                    break
+        if not device:
+            return dict(self._mount_failure("missing", target, []), powered_off=False)
+
+        disk = self._parent_disk(device)
+        results = [
+            self._unmount_target(partition)
+            for partition in (self._mounted_partitions(disk) or [device])
+        ]
+
+        for result in results:
+            if not result["success"]:
+                return dict(result, powered_off=False)
+
+        attempts: list = []
+        powered = self._power_off_disk(disk, attempts) if disk else False
+        return {
+            "success": True,
+            "path": next((r["path"] for r in results if r.get("path")), ""),
+            "reason": "ok",
+            "detail": self._attempt_detail(attempts),
+            "attempts": attempts,
+            "powered_off": powered,
+        }
 
     _POLKIT_RULE_PATH = _POLKIT_RULE_PATH
 
@@ -1906,6 +2217,34 @@ class Plugin:
 
     async def unmount_drive(self, target: str) -> dict:
         return await asyncio.to_thread(self._unmount_target, target)
+
+    async def eject_drive(self, target: str) -> dict:
+        """Unmount and power down a drive so it can be pulled out safely."""
+        return await asyncio.to_thread(self._eject_target, target)
+
+    async def _refresh_mount_permission(self) -> None:
+        """Keep a rule the user already allowed up to date.
+
+        The rule gained the power-off action when safe eject arrived, and
+        someone who pressed Allow mounting before that would otherwise be
+        left with one that no longer covers what the button does. Only a rule
+        that is already installed is rewritten - nothing is ever installed on
+        the user's behalf.
+        """
+        if _ROOT_HELPER is None or not self._mount_permission_installed():
+            return
+        try:
+            with open(self._POLKIT_RULE_PATH, "r", encoding="utf-8") as f:
+                installed = f.read()
+        except OSError:
+            return
+        if installed == _polkit_rule_text(self._current_user()):
+            return
+        ok, error = await asyncio.to_thread(self._ask_root_helper, "install")
+        decky.logger.info(
+            "Decky File Manager: mount rule refreshed" if ok
+            else f"Decky File Manager: could not refresh the mount rule ({error})"
+        )
 
     async def list_drives(self) -> dict:
         """Every volume worth offering, mounted or merely plugged in.
@@ -2240,6 +2579,7 @@ class Plugin:
 
         name = os.path.basename(src_path)
         raw_dst = os.path.join(target_dir, name)
+        replacing = ""
 
         if os.path.exists(raw_dst):
             if conflict_strategy == "ignore":
@@ -2247,8 +2587,9 @@ class Plugin:
             if conflict_strategy == "cancel":
                 return {"ok": True, "cancelled": True}
             if conflict_strategy == "replace":
-                self._remove_path(raw_dst)
-                dst = raw_dst
+                # Beside the old item first, in its place at the end.
+                dst = self._unique_target_path(raw_dst)
+                replacing = raw_dst
             elif conflict_strategy == "keep-both":
                 dst = self._unique_target_path(raw_dst)
             elif conflict_strategy == "merge":
@@ -2258,19 +2599,35 @@ class Plugin:
         else:
             dst = raw_dst
 
-        try:
-            if conflict_strategy == "merge" and os.path.isdir(src_path) and os.path.isdir(dst):
-                import shutil
+        merging = conflict_strategy == "merge" and os.path.isdir(src_path) and os.path.isdir(dst)
 
-                shutil.copytree(src_path, dst, dirs_exist_ok=True)
-                if mode == "cut":
-                    shutil.rmtree(src_path)
-            elif mode == "copy":
-                self._copy_path(src_path, dst)
-            else:
-                self._move_path(src_path, dst)
+        def work() -> None:
+            try:
+                if merging:
+                    self._copy_path(src_path, dst, dirs_exist_ok=True)
+                    if mode == "cut":
+                        self._remove_path(src_path)
+                elif mode == "copy":
+                    self._copy_path(src_path, dst)
+                else:
+                    self._move_path(src_path, dst)
+            except BaseException:
+                if replacing:
+                    self._discard_partial(dst)
+                raise
+            if replacing:
+                self._remove_path(replacing)
+                os.replace(dst, replacing)
+
+        instant = mode == "cut" and not merging and self._same_filesystem(src_path, dst)
+
+        try:
+            cancelled = await self._run_tracked("copy" if mode == "copy" else "move", src_path, work, not instant)
         except PermissionError as e:
             raise PermissionError(f"Sem permissão: {e}") from e
+
+        if cancelled:
+            return {"ok": True, "cancelled": True}
 
         if mode == "cut" and self._clipboard_path and (
             self._clipboard_path == src_path or self._is_subpath(self._clipboard_path, src_path)
@@ -2279,7 +2636,7 @@ class Plugin:
             self._clipboard_kind = None
             self._save_runtime_state()
 
-        return {"ok": True, "success": True, "new_path": dst, "conflict_strategy": conflict_strategy}
+        return {"ok": True, "success": True, "new_path": replacing or dst, "conflict_strategy": conflict_strategy}
 
     async def long_running(self):
         await asyncio.sleep(15)
@@ -2287,6 +2644,7 @@ class Plugin:
 
     async def _main(self):
         self.loop = asyncio.get_event_loop()
+        await self._refresh_mount_permission()
 
     async def _unload(self):
         pass
