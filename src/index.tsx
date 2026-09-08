@@ -481,8 +481,23 @@ function driveLabelFor(drive: DriveEntry): string {
 
 const listDir = callable<[string], { path: string; items: FileEntry[] }>("list_dir");
 const listDrives = callable<[], { drives: DriveEntry[] }>("list_drives");
-const mountDrive = callable<[string], { success: boolean; path: string }>("mount_drive");
-const unmountDrive = callable<[string], { success: boolean; path: string }>("unmount_drive");
+/**
+ * What the backend answers when asked to mount or unmount. The helpers it
+ * tried and what each of them said travel as *data*: an exception only
+ * reaches here as whatever the RPC bridge chose to make of it, which is not
+ * reliably a message at all, and a mount that fails with nothing to say for
+ * itself cannot be diagnosed off-device.
+ */
+type DeviceResult = {
+  success: boolean;
+  path: string;
+  reason?: string;
+  detail?: string;
+  attempts?: { tool: string; message: string }[];
+};
+
+const mountDrive = callable<[string], DeviceResult>("mount_drive");
+const unmountDrive = callable<[string], DeviceResult>("unmount_drive");
 
 // How often the drives bar re-reads the block devices, so a stick plugged in
 // while the browser is open turns up on its own.
@@ -663,13 +678,29 @@ function backendErrorMessage(e: any, fallbackKey: string): string {
  * whichever mount helper answered.
  */
 function deviceErrorMessage(e: any, deniedKey: string, failedKey: string): string {
-  const message = String(e?.message ?? "");
+  // A rejected RPC call arrives as an Error, as a bare string, or as the
+  // response object itself, depending on the bridge; take the text out of
+  // whichever it is rather than assuming `.message`.
+  const message =
+    e instanceof Error ? e.message : typeof e === "string" ? e : String(e?.message ?? e?.detail ?? e?.result ?? "");
   const base = message.toLowerCase().includes("permiss") ? t(deniedKey) : t(failedKey);
   // The mount helper's own words are the only clue to *why* it refused - an
   // NTFS volume Windows left dirty, a filesystem this image cannot read - so
   // they are kept after the sentence instead of being swallowed by it.
   const separator = message.indexOf(": ");
-  const detail = separator >= 0 ? message.slice(separator + 2).trim() : "";
+  const detail = separator >= 0 ? message.slice(separator + 2).trim() : message.trim();
+  return detail ? `${base} (${detail})` : base;
+}
+
+/**
+ * The same sentence, built from a structured answer instead of an error.
+ * `detail` is the helpers' own words and stays untranslated on purpose:
+ * "Not authorized to perform operation" and "volume is hibernated" are what
+ * has to be searched for, and translating them would lose them.
+ */
+function deviceResultMessage(res: DeviceResult | undefined, deniedKey: string, failedKey: string): string {
+  const base = res?.reason === "denied" ? t(deniedKey) : t(failedKey);
+  const detail = (res?.detail ?? "").trim();
   return detail ? `${base} (${detail})` : base;
 }
 
@@ -2106,10 +2137,10 @@ function FileManagerPage() {
           try {
             const res = await mountDrive(device);
             await refreshDrives();
-            if (res && res.path) {
+            if (res && res.success && res.path) {
               await pane.loadPath(res.path, t("error.directory_not_found"));
             } else {
-              pane.setError(t("error.could_not_mount"));
+              pane.setError(deviceResultMessage(res, "error.mount_denied", "error.could_not_mount"));
             }
           } catch (e) {
             pane.setError(deviceErrorMessage(e, "error.mount_denied", "error.could_not_mount"));
@@ -2140,7 +2171,11 @@ function FileManagerPage() {
 
       void (async () => {
         try {
-          await unmountDrive(target);
+          const res = await unmountDrive(target);
+          if (res && !res.success) {
+            pane.setError(deviceResultMessage(res, "error.unmount_denied", "error.could_not_unmount"));
+            return;
+          }
           const home = drives.find((entry) => entry.kind === "home")?.path ?? "/home/deck";
           const prefix = drive.path === "/" ? "/" : `${drive.path}/`;
           for (const other of panesRef.current) {

@@ -1308,6 +1308,31 @@ class Plugin:
 
         return drives
 
+    # Where a mount helper lives when the plugin's PATH does not mention it.
+    _MOUNT_PATH_DIRS = ("/usr/bin", "/bin", "/usr/sbin", "/sbin", "/usr/local/bin")
+
+    @classmethod
+    def _resolve_binary(cls, name: str) -> str | None:
+        """The absolute path of a mount helper, PATH or no PATH.
+
+        A plugin does not inherit a login shell's environment, so a helper
+        that is installed but simply unreachable used to look exactly like
+        one that is not installed at all - and both looked like nothing,
+        because an attempt that never ran recorded nothing to say for itself.
+        """
+        import shutil
+
+        if os.path.isabs(name):
+            return name if os.access(name, os.X_OK) else None
+        found = shutil.which(name)
+        if found:
+            return found
+        for directory in cls._MOUNT_PATH_DIRS:
+            candidate = os.path.join(directory, name)
+            if os.access(candidate, os.X_OK):
+                return candidate
+        return None
+
     def _run_command(self, command: list) -> tuple:
         """(returncode, stdout, stderr); returncode is None when it never ran."""
         import subprocess
@@ -1380,7 +1405,7 @@ class Plugin:
                 collapsed = tail.split(": ", 1)[1]
         return collapsed[:240]
 
-    def _mount_device(self, device: str) -> str:
+    def _mount_device(self, device: str) -> dict:
         """Mount a volume and answer with where it landed.
 
         Several helpers are tried in turn rather than one. udisks2 is the only
@@ -1392,20 +1417,23 @@ class Plugin:
         /proc/mounts rather than parsed out of their output, which differs
         between versions.
 
-        Every attempt is kept, and the failure carries all of them: which tool
+        Every attempt is kept, and the answer carries all of them: which tool
         refused and in whose words is the only thing that distinguishes "the
         policy would not let us" from "Windows left this volume dirty", and
-        neither is guessable from here.
+        neither is guessable from here. The report travels as the return value
+        rather than as an exception message - an exception has to survive the
+        RPC bridge, which does not promise to hand the frontend anything more
+        than the fact that something went wrong.
         """
         if not device.startswith("/dev/"):
-            raise ValueError(f"Dispositivo inválido: {device}")
+            return self._mount_failure("invalid", device, [])
         if not os.path.exists(device):
-            raise FileNotFoundError(f"Dispositivo não encontrado: {device}")
+            return self._mount_failure("missing", device, [])
 
         real = os.path.realpath(device)
         existing = self._mount_points().get(real)
         if existing:
-            return existing
+            return {"success": True, "path": existing, "reason": "already", "detail": "", "attempts": []}
 
         props = self._udev_properties(os.path.join("/sys/class/block", os.path.basename(real)))
         fstype = props.get("ID_FS_TYPE") or ""
@@ -1413,18 +1441,25 @@ class Plugin:
         attempts: list = []
 
         def try_command(command: list) -> str | None:
-            code, out, err = self._run_command(command)
-            if code is None and not err:
-                return None  # the tool is not installed here
+            tool = os.path.basename(command[0])
+            binary = self._resolve_binary(command[0])
+            if binary is None:
+                # Worth saying out loud: a helper being absent is a different
+                # problem from a helper refusing, and the two used to be
+                # indistinguishable from the outside.
+                attempts.append({"tool": tool, "message": "not installed"})
+                return None
+            code, out, err = self._run_command([binary] + command[1:])
             point = self._mount_points().get(real)
             if point:
                 return point
-            attempts.append((os.path.basename(command[0]), self._summarize_output(err or out or f"exit {code}")))
+            answer = err or out or (f"exit {code}" if code is not None else "did not run")
+            attempts.append({"tool": tool, "message": self._summarize_output(answer)})
             return None
 
         point = try_command(["udisksctl", "mount", "--no-user-interaction", "-b", device])
         if point:
-            return point
+            return self._mount_success(point, attempts)
 
         # udisks refuses a volume whose type it could not settle on, which is
         # the usual answer for NTFS on an image that has both the kernel
@@ -1435,7 +1470,7 @@ class Plugin:
                     ["udisksctl", "mount", "--no-user-interaction", "-b", device, "-t", driver]
                 )
                 if point:
-                    return point
+                    return self._mount_success(point, attempts)
 
         # A Windows volume that was hibernated or unmounted uncleanly is
         # refused by every driver until someone says otherwise; ntfs-3g is the
@@ -1448,35 +1483,45 @@ class Plugin:
                     ["ntfs-3g", "-o", "remove_hiberfile,recover" + (f",{info}" if info else ""), device, target]
                 )
                 if point:
-                    return point
+                    return self._mount_success(point, attempts)
                 self._discard_target_dir(target)
 
         point = try_command(["systemd-mount", "--no-ask-password", "--collect", device])
         if point:
-            return point
+            return self._mount_success(point, attempts)
 
         target = self._mount_target_dir(label or os.path.basename(real))
         if target:
             point = try_command(["mount"] + self._mount_options_for(fstype) + [device, target])
             if point:
-                return point
+                return self._mount_success(point, attempts)
             # Nothing was mounted here after all; take the directory back.
             self._discard_target_dir(target)
 
-        if not attempts:
-            raise RuntimeError(f"Nenhuma ferramenta de montagem disponível para {device}")
+        if any(self._looks_like_denial(attempt["message"]) for attempt in attempts):
+            return self._mount_failure("denied", "", attempts)
+        if attempts and all(attempt["message"] == "not installed" for attempt in attempts):
+            return self._mount_failure("no_tools", "", attempts)
+        return self._mount_failure("failed", "", attempts)
 
-        # The same helper often refuses the same way several times over (the
-        # NTFS retries above); say it once.
+    @staticmethod
+    def _mount_success(path: str, attempts: list) -> dict:
+        return {"success": True, "path": path, "reason": "ok", "detail": "", "attempts": attempts}
+
+    @staticmethod
+    def _mount_failure(reason: str, note: str, attempts: list) -> dict:
+        """A failure with every helper's own words attached.
+
+        The same helper often refuses the same way several times over (the
+        NTFS retries), so each distinct sentence is said once.
+        """
         unique: list = []
-        for tool, message in attempts:
-            entry = f"{tool}: {message}"
-            if message and entry not in unique:
+        for attempt in attempts:
+            entry = f"{attempt['tool']}: {attempt['message']}"
+            if attempt["message"] and entry not in unique:
                 unique.append(entry)
-        detail = "; ".join(unique[:3])
-        if any(self._looks_like_denial(message) for _, message in attempts):
-            raise PermissionError(f"Sem permissão para montar {device}: {detail}")
-        raise RuntimeError(f"Não foi possível montar {device}: {detail}")
+        detail = "; ".join(unique[:3]) or note
+        return {"success": False, "path": "", "reason": reason, "detail": detail, "attempts": attempts}
 
     @staticmethod
     def _discard_target_dir(target: str) -> None:
@@ -1487,8 +1532,12 @@ class Plugin:
             except OSError:
                 break
 
-    def _unmount_target(self, target: str) -> str:
-        """Unmount a device or a mount point, and answer with the freed path."""
+    def _unmount_target(self, target: str) -> dict:
+        """Unmount a device or a mount point, and answer with the freed path.
+
+        Shaped like _mount_device: the result says what happened rather than
+        leaving it to an exception message to get across the bridge intact.
+        """
         if target.startswith("/dev/"):
             device = target
         else:
@@ -1499,21 +1548,24 @@ class Plugin:
                     device = candidate
                     break
             if not device:
-                raise FileNotFoundError(f"Nenhum dispositivo montado em: {target}")
+                return self._mount_failure("missing", target, [])
 
         real = os.path.realpath(device)
         point = self._mount_points().get(real)
         if point is None:
-            return ""
+            return {"success": True, "path": "", "reason": "already", "detail": "", "attempts": []}
 
-        problems: list = []
+        attempts: list = []
         for command in (
             ["udisksctl", "unmount", "--no-user-interaction", "-b", device],
             ["umount", device],
         ):
-            code, out, err = self._run_command(command)
-            if code is None and not err:
+            tool = os.path.basename(command[0])
+            binary = self._resolve_binary(command[0])
+            if binary is None:
+                attempts.append({"tool": tool, "message": "not installed"})
                 continue
+            code, out, err = self._run_command([binary] + command[1:])
             if real not in self._mount_points():
                 # udisks removes the directory it created; one this plugin
                 # made itself is left behind, so it goes here.
@@ -1521,25 +1573,21 @@ class Plugin:
                     os.rmdir(point)
                 except OSError:
                     pass
-                return point
-            problems.append((err or out).strip())
+                return self._mount_success(point, attempts)
+            answer = err or out or (f"exit {code}" if code is not None else "did not run")
+            attempts.append({"tool": tool, "message": self._summarize_output(answer)})
 
-        detail = next((problem for problem in problems if problem), "")
-        if problems and any(self._looks_like_denial(problem) for problem in problems):
-            raise PermissionError(
-                f"Sem permissão para desmontar {device}: {detail}" if detail else f"Sem permissão para desmontar {device}"
-            )
-        raise RuntimeError(
-            f"Não foi possível desmontar {device}: {detail}" if detail else f"Não foi possível desmontar {device}"
-        )
+        if any(self._looks_like_denial(attempt["message"]) for attempt in attempts):
+            return self._mount_failure("denied", "", attempts)
+        if attempts and all(attempt["message"] == "not installed" for attempt in attempts):
+            return self._mount_failure("no_tools", "", attempts)
+        return self._mount_failure("failed", "", attempts)
 
     async def mount_drive(self, device: str) -> dict:
-        path = await asyncio.to_thread(self._mount_device, device)
-        return {"success": True, "path": path}
+        return await asyncio.to_thread(self._mount_device, device)
 
     async def unmount_drive(self, target: str) -> dict:
-        path = await asyncio.to_thread(self._unmount_target, target)
-        return {"success": True, "path": path}
+        return await asyncio.to_thread(self._unmount_target, target)
 
     async def list_drives(self) -> dict:
         """Every volume worth offering, mounted or merely plugged in.
